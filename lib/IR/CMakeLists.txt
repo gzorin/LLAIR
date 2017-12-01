@@ -5,7 +5,8 @@ include_directories(
 add_definitions(${LLVM_DEFINITIONS})
 
 add_library(LLAIR STATIC
-  LLAIRContext.cpp)
+  LLAIRContext.cpp
+  Module.cpp)
 
 install(
   TARGETS LLAIR
