@@ -4,17 +4,27 @@
 
 #include "popen2.h"
 
+#include <algorithm>
 #include <iostream>
+#include <vector>
 
 #include <unistd.h>
 
 namespace llair {
 
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
-runAndWait(llvm::StringRef command, llvm::MemoryBufferRef input)
+runAndWait(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args, llvm::MemoryBufferRef input)
 {
+  std::vector<char *> argv;
+  argv.reserve(args.size());
+  std::transform(args.begin(), args.end(), std::back_inserter(argv),
+		 [](llvm::StringRef arg) -> char * {
+		   return const_cast<char * const>(arg.data());
+		 });
+  argv.push_back(nullptr);
+
   struct popen2 child;
-  int e = popen2(command.data(), &child);
+  int e = popen2(path.data(), argv.data(), &child);
 
   if (e < 0) {
     return std::error_code(errno, std::generic_category());

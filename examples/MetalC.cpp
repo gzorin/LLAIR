@@ -2,6 +2,7 @@
 #include <llair/IR/Module.h>
 #include <llair/Tools/Compile.h>
 
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
@@ -55,6 +56,7 @@ main(int argc, char **argv) {
     return 1;
   }
 
+  llvm::WriteBitcodeToFile(module->getLLModule(), output_file->os());
   output_file->keep();
 
   return 0;

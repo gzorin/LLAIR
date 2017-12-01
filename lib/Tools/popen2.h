@@ -12,7 +12,7 @@ struct popen2 {
   int   from_child, to_child;
 };
 
-int popen2(const char *, struct popen2 *);
+int popen2(char const *, char * const[], struct popen2 *);
 
 #if defined(__cplusplus)
 }

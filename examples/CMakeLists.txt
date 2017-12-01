@@ -8,7 +8,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 llvm_map_components_to_libnames(
   llvm_libs
-  support core
+  support core bitreader bitwriter
 )
 
 # llair-test

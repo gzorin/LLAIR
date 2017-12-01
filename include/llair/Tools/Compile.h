@@ -12,6 +12,8 @@ namespace llair {
   class LLAIRContext;
   class Module;
 
+  void setPathToCompileTool(llvm::StringRef path);
+
   llvm::Expected<std::unique_ptr<Module>> compileBuffer(llvm::MemoryBufferRef buffer, LLAIRContext& context);
 
 } // End namespace llair

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-int popen2(const char *cmdline, struct popen2 *childinfo) {
+int popen2(char const *path, char * const argv[], struct popen2 *childinfo) {
   pid_t p;
   int pipe_stdin[2], pipe_stdout[2];
 
@@ -18,7 +18,7 @@ int popen2(const char *cmdline, struct popen2 *childinfo) {
     dup2(pipe_stdin[0], 0);
     close(pipe_stdout[0]);
     dup2(pipe_stdout[1], 1);
-    execl("/bin/sh", "sh", "-c", cmdline, 0);
+    execv(path, argv);
     perror("execl"); exit(99);
   }
   childinfo->child_pid = p;
