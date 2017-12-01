@@ -1,4 +1,5 @@
 #include <llair/IR/LLAIRContext.h>
+#include <llair/IR/Module.h>
 
 #include <llvm/IR/LLVMContext.h>
 
@@ -10,4 +11,8 @@ main(int argc, const char **argv) {
 
   std::unique_ptr<llvm::LLVMContext> llcontext(new llvm::LLVMContext());
   std::unique_ptr<llair::LLAIRContext> context(new llair::LLAIRContext(*llcontext));
+
+  std::unique_ptr<llair::Module> module(new llair::Module("test", *context));
+
+  module->getLLModule()->dump();
 }
