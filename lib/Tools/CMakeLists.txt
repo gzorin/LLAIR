@@ -5,7 +5,8 @@ include_directories(
 add_definitions(${LLVM_DEFINITIONS})
 
 add_library(LLAIRTools STATIC
-  Compile.cpp)
+  Compile.cpp
+  popen2.c)
 
 install(
   TARGETS LLAIRTools
