@@ -6,8 +6,10 @@
 namespace llair {
 
 llvm::Expected<std::unique_ptr<Module>>
-compileBuffer(llvm::MemoryBufferRef buffer) {
-  
+compileBuffer(llvm::MemoryBufferRef buffer, LLAIRContext& context) {
+  std::unique_ptr<Module> result;
+
+  return std::move(result);
 }
 
 } // End llair namespace
