@@ -5,6 +5,7 @@
 #include <llvm/IR/Module.h>
 
 #include "LLAIRContextImpl.h"
+#include "Metadata.h"
 
 namespace llair {
 
@@ -66,11 +67,59 @@ Module::~Module()
 void
 Module::readMetadata()
 {
+  // Version
+  {
+    auto md = d_llmodule->getNamedMetadata("air.version");
+    if (md) {
+      auto version_md = md->getOperand(0);
+
+      auto
+	major = readMDSInt(*version_md->getOperand(0)),
+	minor = readMDSInt(*version_md->getOperand(1)),
+	patch = readMDSInt(*version_md->getOperand(2));
+
+      if (major && minor && patch) {
+	setVersion({ *major, *minor, *patch });
+      }
+    }
+  }
+
+  // Language
+  {
+    auto md = d_llmodule->getNamedMetadata("air.language_version");
+    if (md) {
+      auto language_md = md->getOperand(0);
+
+      auto
+	name  = readMDString(*language_md->getOperand(0));
+      auto
+	major = readMDSInt(*language_md->getOperand(1)),
+	minor = readMDSInt(*language_md->getOperand(2)),
+	patch = readMDSInt(*language_md->getOperand(3));
+
+      if (name, major && minor && patch) {
+	setLanguage({ name->str(), { *major, *minor, *patch } });
+      }
+    }
+  }
 }
 
 void
 Module::writeMetadata() const
 {
+  auto& llcontext = d_llmodule->getContext();
+
+  // Version
+  {
+    auto md = insertNamedMetadata(*d_llmodule, "air.version");
+    if (md) {
+      md->addOperand(llvm::MDTuple::get(llcontext, {
+	  writeMDSInt(llcontext, d_version.major),
+	  writeMDSInt(llcontext, d_version.minor),
+	  writeMDSInt(llcontext, d_version.patch)
+      }));
+    }
+  }
 }
 
 } // End namespace llair

@@ -11,6 +11,8 @@
 
 #include <Metal/Metal.h>
 
+#include <iostream>
+
 namespace {
 
 #include "example_metal.h"
@@ -22,6 +24,7 @@ main(int argc, char ** argv) {
   std::unique_ptr<llvm::LLVMContext> llcontext(new llvm::LLVMContext());
   std::unique_ptr<llair::LLAIRContext> context(new llair::LLAIRContext(*llcontext));
 
+  // Compile:
   llvm::StringRef source(reinterpret_cast<const char *>(&example_metal[0]),
 			 example_metal_len);
 
@@ -31,6 +34,15 @@ main(int argc, char ** argv) {
     return -1;
   }
 
+  (*module)->readMetadata();
+
+  const auto& version = (*module)->getVersion();
+  std::cerr << "version: " << version.major << "." << version.minor << "." << version.patch << std::endl;
+
+  const auto& language = (*module)->getLanguage();
+  std::cerr << "language: " << language.name << " " << language.version.major << "." << language.version.minor << "." << language.version.patch << std::endl;
+
+  // Turn into library bitcode:
   auto library = llair::makeLibrary(**module);
 
   if (!library) {
