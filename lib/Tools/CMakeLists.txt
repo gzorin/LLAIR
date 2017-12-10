@@ -6,6 +6,7 @@ add_definitions(${LLVM_DEFINITIONS})
 
 add_library(LLAIRTools STATIC
   Compile.cpp
+  MakeLibrary.cpp
   Program.cpp
   Tools.cpp
   popen2.c)

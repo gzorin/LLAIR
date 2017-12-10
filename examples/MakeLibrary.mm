@@ -1,0 +1,67 @@
+//-*-C++-*-
+#include <llair/IR/LLAIRContext.h>
+#include <llair/IR/Module.h>
+#include <llair/Tools/Compile.h>
+#include <llair/Tools/MakeLibrary.h>
+
+#include <llvm/ADT/StringRef.h>
+#include <llvm/IR/LLVMContext.h>
+
+#include <dispatch/dispatch.h>
+
+#include <Metal/Metal.h>
+
+namespace {
+
+#include "example_metal.h"
+
+}
+
+int
+main(int argc, char ** argv) {
+  std::unique_ptr<llvm::LLVMContext> llcontext(new llvm::LLVMContext());
+  std::unique_ptr<llair::LLAIRContext> context(new llair::LLAIRContext(*llcontext));
+
+  llvm::StringRef source(reinterpret_cast<const char *>(&example_metal[0]),
+			 example_metal_len);
+
+  auto module = llair::compileBuffer(llvm::MemoryBufferRef(source, ""), *context);
+
+  if (!module) {
+    return -1;
+  }
+
+  auto library = llair::makeLibrary(**module);
+
+  if (!library) {
+    return -1;
+  }
+
+  auto library_buffer = library->release();
+
+  @autoreleasepool {
+    NSError *err = nil;
+    
+    auto device = MTLCreateSystemDefaultDevice();
+
+    auto library_data = dispatch_data_create(library_buffer->getBufferStart(), library_buffer->getBufferSize(),
+					     dispatch_get_main_queue(),
+					     ^{ delete library_buffer; });
+
+    auto library = [device newLibraryWithData: library_data error: &err];
+
+    if (!library) {
+      NSLog(@"Error occurred creating MTLLibrary: %@", err);
+      return -1;
+    }
+
+    auto fragment_main = [library newFunctionWithName: @"fragment_main"];
+
+    if (!library) {
+      NSLog(@"Failed to get 'fragment_main' function");
+      return -1;
+    }
+  }
+
+  return 0;
+}
