@@ -73,7 +73,7 @@ compileBuffer(llvm::MemoryBufferRef buffer, LLAIRContext& context) {
     filename.data(), "-x", "metal", "-o", "-", "-"
   };
 
-  auto bitcode = llvm::errorOrToExpected(runAndWait(path.str(), args, buffer));
+  auto bitcode = llvm::errorOrToExpected(runProgram(path.str(), args, buffer));
 
   if (bitcode) {
     auto llmodule = llvm::getLazyBitcodeModule(**bitcode, context.getLLContext());
