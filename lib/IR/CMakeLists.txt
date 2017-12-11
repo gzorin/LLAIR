@@ -5,6 +5,7 @@ include_directories(
 add_definitions(${LLVM_DEFINITIONS})
 
 add_library(LLAIR STATIC
+  EntryPoint.cpp
   LLAIRContext.cpp
   Module.cpp)
 

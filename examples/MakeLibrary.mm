@@ -1,4 +1,5 @@
 //-*-C++-*-
+#include <llair/IR/EntryPoint.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Tools/Compile.h>
@@ -11,6 +12,7 @@
 
 #include <Metal/Metal.h>
 
+#include <algorithm>
 #include <iostream>
 
 namespace {
@@ -41,6 +43,13 @@ main(int argc, char ** argv) {
 
   const auto& language = (*module)->getLanguage();
   std::cerr << "language: " << language.name << " " << language.version.major << "." << language.version.minor << "." << language.version.patch << std::endl;
+
+  const auto& entry_points = (*module)->getEntryPointList();
+  std::cerr << "entry points: " << std::endl;
+  std::for_each(entry_points.begin(), entry_points.end(),
+		[=](const auto& entry_point)->void {
+		  std::cerr << "\t" << entry_point.getFunction()->getName().str() << std::endl;
+		});
 
   // Turn into library bitcode:
   auto library = llair::makeLibrary(**module);

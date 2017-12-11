@@ -14,6 +14,16 @@
 namespace llvm {
 class LLVMContext;
 class Module;
+class ValueSymbolTable;
+} // End namespace llvm
+
+namespace llair {
+class EntryPoint;
+class Module;
+} // End namespace llair
+
+namespace llvm {
+template<> struct SymbolTableListParentType<llair::EntryPoint> { using type = llair::Module; };
 } // End namespace llvm
 
 namespace llair {
@@ -21,6 +31,8 @@ namespace llair {
 class Module
 {
 public:
+
+  using EntryPointListType = llvm::SymbolTableList<EntryPoint>;
 
   static const Module*          Get(const llvm::Module *);
   static Module*                Get(llvm::Module *);
@@ -37,6 +49,9 @@ public:
 
   const llvm::Module           *getLLModule() const { return d_llmodule.get(); }
   llvm::Module                 *getLLModule()       { return d_llmodule.get(); }
+
+  const llvm::ValueSymbolTable& getValueSymbolTable() const { return d_llmodule->getValueSymbolTable(); }
+  llvm::ValueSymbolTable&       getValueSymbolTable()       { return d_llmodule->getValueSymbolTable(); }
 
   //
   struct Version {
@@ -56,8 +71,16 @@ public:
   const Language& getLanguage() const        { return d_language;     }
 
   //
+  const EntryPointListType&     getEntryPointList() const { return d_entry_points; };
+  EntryPointListType&           getEntryPointList()       { return d_entry_points; };
+
+  static EntryPointListType Module::*getSublistAccess(EntryPoint *) {
+    return &Module::d_entry_points;
+  }
+
+  //
   void readMetadata();
-  void writeMetadata() const;
+  void writeMetadata();
 
 private:
 
@@ -66,6 +89,7 @@ private:
 
   Version d_version;
   Language d_language;
+  EntryPointListType d_entry_points;
 };
 
 } // End llair namespace
