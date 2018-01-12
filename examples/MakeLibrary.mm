@@ -6,6 +6,7 @@
 #include <llair/Tools/MakeLibrary.h>
 
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/LLVMContext.h>
 
 #include <dispatch/dispatch.h>
@@ -17,7 +18,7 @@
 
 namespace {
 
-#include "example_metal.h"
+#include "example_metal_bc.h"
 
 }
 
@@ -27,24 +28,32 @@ main(int argc, char ** argv) {
   std::unique_ptr<llair::LLAIRContext> context(new llair::LLAIRContext(*llcontext));
 
   // Compile:
-  llvm::StringRef source(reinterpret_cast<const char *>(&example_metal[0]),
-			 example_metal_len);
+  auto source = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(reinterpret_cast<const char *>(&example_metal_bc[0]), example_metal_bc_len),
+						 "",
+						 false);
 
-  auto module = llair::compileBuffer(llvm::MemoryBufferRef(source, ""), *context);
+  auto llmodule = llvm::getLazyBitcodeModule(llvm::MemoryBufferRef(*source), *llcontext);
 
-  if (!module) {
+  if (!llmodule) {
     return -1;
   }
 
-  (*module)->readMetadata();
+  auto error = (*llmodule)->materializeAll();
+  if (error) {
+    return -1;
+  }
 
-  const auto& version = (*module)->getVersion();
+  auto module = std::make_unique<llair::Module>(std::move(*llmodule));
+
+  module->readMetadata();
+
+  const auto& version = module->getVersion();
   std::cerr << "version: " << version.major << "." << version.minor << "." << version.patch << std::endl;
 
-  const auto& language = (*module)->getLanguage();
+  const auto& language = module->getLanguage();
   std::cerr << "language: " << language.name << " " << language.version.major << "." << language.version.minor << "." << language.version.patch << std::endl;
 
-  const auto& entry_points = (*module)->getEntryPointList();
+  const auto& entry_points = module->getEntryPointList();
   std::cerr << "entry points: " << std::endl;
   std::for_each(entry_points.begin(), entry_points.end(),
 		[=](const auto& entry_point)->void {
@@ -52,9 +61,10 @@ main(int argc, char ** argv) {
 		});
 
   // Turn into library bitcode:
-  auto library = llair::makeLibrary(**module);
+  auto library = llair::makeLibrary(*module);
 
   if (!library) {
+    std::cerr << "makeLibrary failed" << std::endl;
     return -1;
   }
 

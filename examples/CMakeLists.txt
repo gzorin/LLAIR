@@ -12,6 +12,7 @@ llvm_map_components_to_libnames(
   support core bitreader bitwriter
 )
 
+#
 macro(add_metal_source srclist src)
   get_filename_component(we ${src} NAME_WE)
   set(dot_h "${we}_metal.h")
@@ -31,6 +32,36 @@ endmacro()
 macro(add_metal_sources srclist)
   foreach(arg IN ITEMS ${ARGN})
     add_metal_source(${srclist} ${arg})
+  endforeach()
+endmacro()
+
+#
+macro(add_compiled_metal_source srclist src)
+  get_filename_component(we ${src} NAME_WE)
+  set(dot_bc "${we}_metal.bc")
+  set(dot_h "${we}_metal_bc.h")
+
+  set(${srclist} ${${srclist}} ${CMAKE_CURRENT_BINARY_DIR}/${dot_h})
+  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${dot_h} PROPERTIES GENERATED 1)
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}
+    COMMAND ${METAL} -x metal -o ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc} ${src}
+    MAIN_DEPENDENCY ${src}
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
+    COMMAND ${XXD} -i ${dot_bc} > ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
+    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  message("Generated ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}")
+endmacro()
+
+macro(add_compiled_metal_sources srclist)
+  foreach(arg IN ITEMS ${ARGN})
+    add_compiled_metal_source(${srclist} ${arg})
   endforeach()
 endmacro()
 
@@ -60,11 +91,13 @@ target_link_libraries(
 
 # make-library
 add_metal_sources(MakeLibrary_METAL_SOURCES example.metal)
+add_compiled_metal_sources(MakeLibrary_COMPILED_METAL_SOURCES example.metal)
 
 add_executable(
   make-library
   MakeLibrary.mm
   ${MakeLibrary_METAL_SOURCES}
+  ${MakeLibrary_COMPILED_METAL_SOURCES}
 )
 
 target_link_libraries(
