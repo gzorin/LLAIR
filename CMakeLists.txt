@@ -19,6 +19,7 @@ find_program(
   METAL metal
   PATHS ${XCODE_DEVELOPER_PATH}/Platforms/MacOSX.platform/usr/bin)
 
+add_subdirectory(include)
 add_subdirectory(lib/IR)
 add_subdirectory(lib/Tools)
 add_subdirectory(examples)
