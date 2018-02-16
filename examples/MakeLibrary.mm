@@ -1,4 +1,5 @@
 //-*-C++-*-
+#include <llair/Bitcode/Bitcode.h>
 #include <llair/IR/EntryPoint.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
@@ -32,28 +33,19 @@ main(int argc, char ** argv) {
 						 "",
 						 false);
 
-  auto llmodule = llvm::getLazyBitcodeModule(llvm::MemoryBufferRef(*source), *llcontext);
+  auto module = llair::getBitcodeModule(llvm::MemoryBufferRef(*source), *context);
 
-  if (!llmodule) {
+  if (!module) {
     return -1;
   }
 
-  auto error = (*llmodule)->materializeAll();
-  if (error) {
-    return -1;
-  }
-
-  auto module = std::make_unique<llair::Module>(std::move(*llmodule));
-
-  module->readMetadata();
-
-  const auto& version = module->getVersion();
+  const auto& version = (*module)->getVersion();
   std::cerr << "version: " << version.major << "." << version.minor << "." << version.patch << std::endl;
 
-  const auto& language = module->getLanguage();
+  const auto& language = (*module)->getLanguage();
   std::cerr << "language: " << language.name << " " << language.version.major << "." << language.version.minor << "." << language.version.patch << std::endl;
 
-  const auto& entry_points = module->getEntryPointList();
+  const auto& entry_points = (*module)->getEntryPointList();
   std::cerr << "entry points: " << std::endl;
   std::for_each(entry_points.begin(), entry_points.end(),
 		[=](const auto& entry_point)->void {
@@ -61,7 +53,7 @@ main(int argc, char ** argv) {
 		});
 
   // Turn into library bitcode:
-  auto library = llair::makeLibrary(*module);
+  auto library = llair::makeLibrary(**module);
 
   if (!library) {
     std::cerr << "makeLibrary failed" << std::endl;

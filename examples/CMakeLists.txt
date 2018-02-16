@@ -102,7 +102,7 @@ add_executable(
 
 target_link_libraries(
   make-library
-  LLAIR LLAIRTools
+  LLAIR LLAIRBitcode LLAIRTools
   ${llvm_libs}
   "-ObjC++"
   "-framework Foundation"
