@@ -49,6 +49,7 @@ public:
 
   const llvm::Module           *getLLModule() const { return d_llmodule.get(); }
   llvm::Module                 *getLLModule()       { return d_llmodule.get(); }
+  std::unique_ptr<llvm::Module> releaseLLModule();
 
   const llvm::ValueSymbolTable& getValueSymbolTable() const { return d_llmodule->getValueSymbolTable(); }
   llvm::ValueSymbolTable&       getValueSymbolTable()       { return d_llmodule->getValueSymbolTable(); }

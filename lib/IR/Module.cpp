@@ -71,6 +71,12 @@ Module::~Module()
   LLAIRContextImpl::Get(d_context).modules().erase(d_llmodule.get());
 }
 
+std::unique_ptr<llvm::Module>
+Module::releaseLLModule()
+{
+  return std::move(d_llmodule);
+}
+
 void
 Module::readMetadata()
 {
