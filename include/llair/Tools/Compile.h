@@ -2,6 +2,7 @@
 #ifndef LLAIR_COMPILER_H
 #define LLAIR_COMPILER_H
 
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -14,7 +15,10 @@ namespace llair {
 
   void setPathToCompileTool(llvm::StringRef path);
 
-  llvm::Expected<std::unique_ptr<Module>> compileBuffer(llvm::MemoryBufferRef buffer, LLAIRContext& context);
+  llvm::Expected<std::unique_ptr<Module>> compileBuffer(
+      llvm::MemoryBufferRef buffer,
+      llvm::ArrayRef<llvm::StringRef> options,
+      LLAIRContext& context);
 
 } // End namespace llair
 

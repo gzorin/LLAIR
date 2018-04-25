@@ -46,7 +46,7 @@ main(int argc, char **argv) {
 
   std::unique_ptr<llair::LLAIRContext> llair_context(new llair::LLAIRContext(*context));
 
-  auto module = exit_on_err(llair::compileBuffer(*buffer, *llair_context));
+  auto module = exit_on_err(llair::compileBuffer(*buffer, {}, *llair_context));
 
   std::error_code error_code;
   std::unique_ptr<llvm::tool_output_file> output_file(new llvm::tool_output_file(output_filename, error_code, llvm::sys::fs::F_None));

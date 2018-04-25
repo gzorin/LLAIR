@@ -65,13 +65,24 @@ getPathToCompileTool() {
 }
 
 llvm::Expected<std::unique_ptr<Module>>
-compileBuffer(llvm::MemoryBufferRef buffer, LLAIRContext& context) {
+compileBuffer(
+    llvm::MemoryBufferRef buffer,
+    llvm::ArrayRef<llvm::StringRef> options,
+    LLAIRContext& context) {
   auto path = getPathToCompileTool();
   auto filename = llvm::sys::path::filename(path).str();
 
-  llvm::ArrayRef<llvm::StringRef> args = {
-    filename.data(), "-x", "metal", "-o", "-", "-"
+  std::vector<llvm::StringRef> args = {
+      filename.data(), "-x", "metal"
   };
+
+  std::copy(
+      options.begin(), options.end(),
+      std::back_inserter(args));
+
+  args.push_back("-o");
+  args.push_back("-");
+  args.push_back("-");
 
   auto bitcode = llvm::errorOrToExpected(runProgram(path.str(), args, buffer));
 
