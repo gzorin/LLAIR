@@ -49,7 +49,7 @@ main(int argc, char **argv) {
   auto module = exit_on_err(llair::compileBuffer(*buffer, {}, *llair_context));
 
   std::error_code error_code;
-  std::unique_ptr<llvm::tool_output_file> output_file(new llvm::tool_output_file(output_filename, error_code, llvm::sys::fs::F_None));
+  std::unique_ptr<llvm::ToolOutputFile> output_file(new llvm::ToolOutputFile(output_filename, error_code, llvm::sys::fs::F_None));
 
   if (error_code) {
     std::cerr << error_code.message() << std::endl;

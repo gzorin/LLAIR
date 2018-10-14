@@ -73,7 +73,7 @@ compileBuffer(
   auto filename = llvm::sys::path::filename(path).str();
 
   std::vector<llvm::StringRef> args = {
-      filename.data(), "-x", "metal"
+      filename.data(), "-c", "-x", "metal"
   };
 
   std::copy(

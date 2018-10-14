@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/errno.h>
 #include <unistd.h>
 
 int popen2(char const *path, char * const argv[], struct popen2 *childinfo) {
@@ -19,7 +21,8 @@ int popen2(char const *path, char * const argv[], struct popen2 *childinfo) {
     close(pipe_stdout[0]);
     dup2(pipe_stdout[1], 1);
     execv(path, argv);
-    perror("execl"); exit(99);
+    fprintf(stderr,"execl of '%s' failed with error: %s\n",
+	    path, strerror(errno)); exit(99);
   }
   childinfo->child_pid = p;
   childinfo->to_child = pipe_stdin[1];
