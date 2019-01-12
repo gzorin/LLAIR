@@ -26,6 +26,9 @@ public:
     kCompute
   };
 
+  static const EntryPoint*  Get(const llvm::Function *);
+  static EntryPoint*        Get(llvm::Function *);
+
   static EntryPoint    *Create(Type, llvm::Function *, Module * = nullptr);
 
   const Module         *getModule() const { return d_module; }

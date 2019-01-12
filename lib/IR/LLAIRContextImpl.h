@@ -8,6 +8,7 @@
 #include <map>
 
 namespace llvm {
+class Function;
 class LLVMContext;
 class Module;
 }
@@ -29,11 +30,15 @@ public:
   std::map<llvm::Module *, Module *>&       modules()       { return d_modules; }
   const std::map<llvm::Module *, Module *>& modules() const { return d_modules; }
 
+  std::map<llvm::Function *, EntryPoint *>&       entry_points()       { return d_entry_points; }
+  const std::map<llvm::Function *, EntryPoint *>& entry_points() const { return d_entry_points; }
+
 private:
 
   llvm::LLVMContext& d_llcontext;
 
   std::map<llvm::Module *, Module *> d_modules;
+  std::map<llvm::Function *, EntryPoint *> d_entry_points;
 };
 
 }
