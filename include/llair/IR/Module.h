@@ -79,6 +79,8 @@ public:
     return &Module::d_entry_points;
   }
 
+  EntryPoint *getEntryPoint(llvm::StringRef) const;
+
   //
   void readMetadata();
   void writeMetadata();

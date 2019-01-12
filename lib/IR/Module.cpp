@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <vector>
 
 #include <llair/IR/EntryPoint.h>
@@ -77,6 +78,50 @@ Module::releaseLLModule()
   return std::move(d_llmodule);
 }
 
+EntryPoint *
+Module::getEntryPoint(llvm::StringRef name) const
+{
+  auto function = d_llmodule->getFunction(name);
+  if (!function) {
+      return nullptr;
+  }
+
+  return EntryPoint::Get(function);
+}
+
+namespace {
+
+template<typename Input1, typename Input2, typename BinaryFunction1, typename BinaryFunction2, typename Compare>
+void
+for_each_symmetric_difference(Input1 first1, Input1 last1,
+			      Input2 first2, Input2 last2,
+			      BinaryFunction1 fn1,
+			      BinaryFunction2 fn2,
+			      Compare comp)
+{
+    while (first1 != last1) {
+        if (first2 == last2) {
+	    std::for_each(
+		first1, last1, fn1);
+	    return;
+	}
+ 
+        if (comp(*first1, *first2)) {
+            fn1(*first1++);
+        } else {
+            if (comp(*first2, *first1)) {
+                fn2(*first2);
+            } else {
+                ++first1;
+            }
+            ++first2;
+        }
+    }
+    std::for_each(first2, last2, fn2);
+}
+
+}
+
 void
 Module::readMetadata()
 {
@@ -120,33 +165,57 @@ Module::readMetadata()
   {
     auto module = this;
 
+    std::vector<EntryPoint *> entry_points;
+    std::transform(
+	d_entry_points.begin(), d_entry_points.end(),
+	std::back_inserter(entry_points),
+	[](auto& entry_point) -> EntryPoint * {
+	    return &entry_point;
+	});
+    std::sort(
+	entry_points.begin(), entry_points.end(),
+	[](auto lhs, auto rhs) -> bool {
+	    return lhs->metadata() < rhs->metadata();
+	});
+
     // Vertex:
     {
       auto md = d_llmodule->getNamedMetadata("air.vertex");
 
       if (md) {
-	std::for_each(md->op_begin(), md->op_end(),
-		      [=](auto entry_point_md)->void {
-			auto it = entry_point_md->op_begin();
-			
-			// The function:
-			if (it == entry_point_md->op_end()) {
-			  return;
-			}
-			
-			auto function_md = llvm::dyn_cast<llvm::ValueAsMetadata>(it++->get());
-			if (!function_md) {
-			  return;
-			}
-			
-			auto function = llvm::dyn_cast<llvm::Function>(function_md->getValue());
-			if (!function) {
-			  return;
-			}
-			
-			// Create the entry point:
-			auto entry_point = EntryPoint::Create(EntryPoint::kVertex, function, module);
-		      });
+	std::vector<llvm::MDNode *> mds;
+	std::copy(
+	    md->op_begin(), md->op_end(),
+	    std::back_inserter(mds));
+	std::sort(
+	    mds.begin(), mds.end());
+
+	std::vector<EntryPoint *> vertex_entry_points;
+	std::copy_if(
+	    entry_points.begin(), entry_points.end(),
+	    std::back_inserter(vertex_entry_points),
+	    [](auto entry_point) -> bool {
+		return entry_point->getKind() == EntryPoint::EntryPointKind::Vertex;
+	    });
+
+	struct Compare {
+	    bool operator()(llvm::MDNode *lhs, EntryPoint *rhs) const {
+		return lhs < rhs->metadata();
+	    }
+	    bool operator()(EntryPoint *lhs, llvm::MDNode *rhs) const {
+		return lhs->metadata() < rhs;
+	    }
+	};
+
+	for_each_symmetric_difference(
+	    mds.begin(), mds.end(),
+	    vertex_entry_points.begin(), vertex_entry_points.end(),
+	    [&](llvm::MDNode *md) -> void {
+		auto entry_point = new VertexEntryPoint(md, module);
+	    },
+	    [](EntryPoint *entry_point) -> void {
+	    },
+	    Compare());
       }
     }
 
@@ -155,28 +224,39 @@ Module::readMetadata()
       auto md = d_llmodule->getNamedMetadata("air.fragment");
 
       if (md) {
-	std::for_each(md->op_begin(), md->op_end(),
-		      [=](auto entry_point_md)->void {
-			auto it = entry_point_md->op_begin();
-			
-			// The function:
-			if (it == entry_point_md->op_end()) {
-			  return;
-			}
-			
-			auto function_md = llvm::dyn_cast<llvm::ValueAsMetadata>(it++->get());
-			if (!function_md) {
-			  return;
-			}
-			
-			auto function = llvm::dyn_cast<llvm::Function>(function_md->getValue());
-			if (!function) {
-			  return;
-			}
-			
-			// Create the entry point:
-			auto entry_point = EntryPoint::Create(EntryPoint::kFragment, function, module);
-		      });
+	std::vector<llvm::MDNode *> mds;
+	std::copy(
+	    md->op_begin(), md->op_end(),
+	    std::back_inserter(mds));
+	std::sort(
+	    mds.begin(), mds.end());
+
+	std::vector<EntryPoint *> fragment_entry_points;
+	std::copy_if(
+	    entry_points.begin(), entry_points.end(),
+	    std::back_inserter(fragment_entry_points),
+	    [](auto entry_point) -> bool {
+		return entry_point->getKind() == EntryPoint::EntryPointKind::Fragment;
+	    });
+
+	struct Compare {
+	    bool operator()(llvm::MDNode *lhs, EntryPoint *rhs) const {
+		return lhs < rhs->metadata();
+	    }
+	    bool operator()(EntryPoint *lhs, llvm::MDNode *rhs) const {
+		return lhs->metadata() < rhs;
+	    }
+	};
+
+	for_each_symmetric_difference(
+	    mds.begin(), mds.end(),
+	    fragment_entry_points.begin(), fragment_entry_points.end(),
+	    [&](llvm::MDNode *md) -> void {
+		auto entry_point = new FragmentEntryPoint(md, module);
+	    },
+	    [](EntryPoint *entry_point) -> void {
+	    },
+	    Compare());
       }
     }
   }
@@ -218,8 +298,8 @@ Module::writeMetadata()
 
     std::for_each(getEntryPointList().begin(), getEntryPointList().end(),
 		  [&](auto& entry_point) -> void {
-		    switch (entry_point.getType()) {
-		    case EntryPoint::kVertex: {
+		    switch (entry_point.getKind()) {
+		    case EntryPoint::Vertex: {
 		      std::vector<llvm::Metadata *> operands;
 
 		      // The function:
@@ -227,7 +307,7 @@ Module::writeMetadata()
 
 		      auto entry_point_md = llvm::MDTuple::get(llcontext, operands);
 		    } break;
-		    case EntryPoint::kFragment: {
+		    case EntryPoint::Fragment: {
 		      std::vector<llvm::Metadata *> operands;
 
 		      // The function:
