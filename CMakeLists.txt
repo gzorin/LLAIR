@@ -4,20 +4,16 @@ project(LLAIR)
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
 find_program(XXD xxd)
 
-find_program(XCODE_SELECT xcode-select)
+find_program(XCRUN xcrun)
 
 execute_process(
-  COMMAND ${XCODE_SELECT} -p
-  OUTPUT_VARIABLE XCODE_DEVELOPER_PATH
+  COMMAND ${XCRUN} --sdk macosx --find metal
+  OUTPUT_VARIABLE METAL
   OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-find_program(
-  METAL metal
-  PATHS ${XCODE_DEVELOPER_PATH}/Platforms/MacOSX.platform/usr/bin)
 
 add_subdirectory(include)
 add_subdirectory(lib/Bitcode)
