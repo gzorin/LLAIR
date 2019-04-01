@@ -18,5 +18,6 @@ execute_process(
 add_subdirectory(include)
 add_subdirectory(lib/Bitcode)
 add_subdirectory(lib/IR)
+add_subdirectory(lib/Linker)
 add_subdirectory(lib/Tools)
 add_subdirectory(examples)
