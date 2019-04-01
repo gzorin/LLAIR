@@ -16,6 +16,15 @@ template class llvm::SymbolTableListTraits<llair::EntryPoint>;
 
 namespace llair {
 
+namespace {
+
+llvm::StringRef s_data_layout =
+    "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-f80:128:128-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-f80:128:128-n8:16:32";
+llvm::StringRef s_target_triple =
+    "air64-apple-macosx10.14.0";
+
+}
+
 const Module *
 Module::Get(const llvm::Module* llmodule) {
   auto& llcontext = llmodule->getContext();
@@ -57,6 +66,9 @@ Module::Module(llvm::StringRef id, LLAIRContext& context)
   , d_llmodule(new llvm::Module(id, context.getLLContext()))
 {
   LLAIRContextImpl::Get(d_context).modules().insert(std::make_pair(d_llmodule.get(), this));
+
+  d_llmodule->setDataLayout(s_data_layout);
+  d_llmodule->setTargetTriple(s_target_triple);
 }
 
 Module::Module(std::unique_ptr<llvm::Module>&& module)
