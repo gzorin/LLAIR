@@ -60,16 +60,16 @@ public:
   };
 
   //
-  void setVersion(const Version& version) { d_version = version; }
-  const Version& getVersion() const       { return d_version;    }
+  void setVersion(const Version& version);
+  Version getVersion() const;
 
   struct Language {
     std::string name;
     Version version;
   };
 
-  void setLanguage(const Language& language) { d_language = language; }
-  const Language& getLanguage() const        { return d_language;     }
+  void setLanguage(const Language& language);
+  Language getLanguage() const;
 
   //
   const EntryPointListType&     getEntryPointList() const { return d_entry_points; };
@@ -90,8 +90,8 @@ private:
   LLAIRContext& d_context;
   std::unique_ptr<llvm::Module> d_llmodule;
 
-  Version d_version;
-  Language d_language;
+  llvm::TypedTrackingMDRef<llvm::MDTuple> d_version_md, d_language_md;
+
   EntryPointListType d_entry_points;
 };
 

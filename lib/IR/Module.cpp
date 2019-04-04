@@ -69,6 +69,9 @@ Module::Module(llvm::StringRef id, LLAIRContext& context)
 
   d_llmodule->setDataLayout(s_data_layout);
   d_llmodule->setTargetTriple(s_target_triple);
+
+  setVersion({ 2, 1, 0 });
+  setLanguage({ "Metal", { 2, 1, 0 } });
 }
 
 Module::Module(std::unique_ptr<llvm::Module>&& module)
@@ -76,6 +79,18 @@ Module::Module(std::unique_ptr<llvm::Module>&& module)
   , d_llmodule(std::move(module))
 {
   LLAIRContextImpl::Get(d_context).modules().insert(std::make_pair(d_llmodule.get(), this));
+
+  auto version_named_md = d_llmodule->getOrInsertNamedMetadata("air.version");
+  if (version_named_md->getNumOperands() > 0) {
+      d_version_md.reset(
+	  llvm::cast<llvm::MDTuple>(version_named_md->getOperand(0)));
+  }
+
+  auto language_named_md = d_llmodule->getOrInsertNamedMetadata("air.language_version");
+  if (language_named_md->getNumOperands() > 0) {
+      d_language_md.reset(
+	  llvm::cast<llvm::MDTuple>(language_named_md->getOperand(0)));
+  }
 }
 
 Module::~Module()
@@ -88,6 +103,88 @@ std::unique_ptr<llvm::Module>
 Module::releaseLLModule()
 {
   return std::move(d_llmodule);
+}
+
+void
+Module::setVersion(const Module::Version& version)
+{
+  auto& ll_context = getLLContext();
+    
+  d_version_md.reset(
+      llvm::MDTuple::get(ll_context, {
+	      llvm::ConstantAsMetadata::get(
+		  llvm::ConstantInt::get(ll_context, llvm::APInt(32, version.major, true))),
+	      llvm::ConstantAsMetadata::get(
+		  llvm::ConstantInt::get(ll_context, llvm::APInt(32, version.minor, true))),
+	      llvm::ConstantAsMetadata::get(
+		  llvm::ConstantInt::get(ll_context, llvm::APInt(32, version.patch, true)))
+	  }));
+
+  auto version_named_md = d_llmodule->getOrInsertNamedMetadata("air.version");
+  if (version_named_md->getNumOperands() > 0) {
+      version_named_md->setOperand(0, d_version_md.get());
+  }
+  else {
+      version_named_md->addOperand(d_version_md.get());
+  }
+}
+
+Module::Version
+Module::getVersion() const
+{
+  if (d_version_md) {
+      auto
+	major = readMDSInt(*d_version_md->getOperand(0)),
+	minor = readMDSInt(*d_version_md->getOperand(1)),
+	patch = readMDSInt(*d_version_md->getOperand(2));
+
+      if (major && minor && patch) {
+	  return { *major, *minor, *patch };
+      }
+  }
+
+  return { 0, 0, 0 };
+}
+
+void
+Module::setLanguage(const Module::Language& language)
+{
+  auto& ll_context = getLLContext();
+
+  d_language_md.reset(
+      llvm::MDTuple::get(ll_context, {
+	    writeMDString(ll_context, language.name),
+	    writeMDInt(ll_context, language.version.major),
+	    writeMDInt(ll_context, language.version.minor),
+	    writeMDInt(ll_context, language.version.patch)
+      }));
+
+  auto language_named_md = d_llmodule->getOrInsertNamedMetadata("air.language_version");
+  if (language_named_md->getNumOperands() > 0) {
+      language_named_md->setOperand(0, d_language_md.get());
+  }
+  else {
+      language_named_md->addOperand(d_language_md.get());
+  }
+}
+
+Module::Language
+Module::getLanguage() const
+{
+  if (d_language_md) {
+      auto
+	name  = readMDString(*d_language_md->getOperand(0));
+      auto
+	major = readMDSInt(*d_language_md->getOperand(1)),
+	minor = readMDSInt(*d_language_md->getOperand(2)),
+	patch = readMDSInt(*d_language_md->getOperand(3));
+
+      if (name && major && minor && patch) {
+	  return { name->str(), { *major, *minor, *patch } };
+      }
+  }
+
+  return { "", { 0, 0, 0 } };
 }
 
 EntryPoint *
@@ -137,42 +234,6 @@ for_each_symmetric_difference(Input1 first1, Input1 last1,
 void
 Module::readMetadata()
 {
-  // Version
-  {
-    auto md = d_llmodule->getNamedMetadata("air.version");
-    if (md) {
-      auto version_md = md->getOperand(0);
-
-      auto
-	major = readMDSInt(*version_md->getOperand(0)),
-	minor = readMDSInt(*version_md->getOperand(1)),
-	patch = readMDSInt(*version_md->getOperand(2));
-
-      if (major && minor && patch) {
-	setVersion({ *major, *minor, *patch });
-      }
-    }
-  }
-
-  // Language
-  {
-    auto md = d_llmodule->getNamedMetadata("air.language_version");
-    if (md) {
-      auto language_md = md->getOperand(0);
-
-      auto
-	name  = readMDString(*language_md->getOperand(0));
-      auto
-	major = readMDSInt(*language_md->getOperand(1)),
-	minor = readMDSInt(*language_md->getOperand(2)),
-	patch = readMDSInt(*language_md->getOperand(3));
-
-      if (name && major && minor && patch) {
-	setLanguage({ name->str(), { *major, *minor, *patch } });
-      }
-    }
-  }
-
   // Entry points:
   {
     auto module = this;
@@ -278,31 +339,6 @@ void
 Module::writeMetadata()
 {
   auto& llcontext = d_llmodule->getContext();
-
-  // Version
-  {
-    auto md = insertNamedMetadata(*d_llmodule, "air.version");
-    if (md) {
-      md->addOperand(llvm::MDTuple::get(llcontext, {
-	  writeMDSInt(llcontext, d_version.major),
-	  writeMDSInt(llcontext, d_version.minor),
-	  writeMDSInt(llcontext, d_version.patch)
-      }));
-    }
-  }
-
-  // Language
-  {
-    auto md = insertNamedMetadata(*d_llmodule, "air.language_version");
-    if (md) {
-      md->addOperand(llvm::MDTuple::get(llcontext, {
-	    writeMDString(llcontext, d_language.name),
-	    writeMDInt(llcontext, d_language.version.major),
-	    writeMDInt(llcontext, d_language.version.minor),
-	    writeMDInt(llcontext, d_language.version.patch)
-      }));
-    }
-  }
 
   // Entry points
   {
