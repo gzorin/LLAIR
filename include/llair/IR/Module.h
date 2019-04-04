@@ -82,8 +82,7 @@ public:
   EntryPoint *getEntryPoint(llvm::StringRef) const;
 
   //
-  void readMetadata();
-  void writeMetadata();
+  void syncMetadata();
 
 private:
 

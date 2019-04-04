@@ -91,6 +91,8 @@ Module::Module(std::unique_ptr<llvm::Module>&& module)
       d_language_md.reset(
 	  llvm::cast<llvm::MDTuple>(language_named_md->getOperand(0)));
   }
+
+  syncMetadata();
 }
 
 Module::~Module()
@@ -232,7 +234,7 @@ for_each_symmetric_difference(Input1 first1, Input1 last1,
 }
 
 void
-Module::readMetadata()
+Module::syncMetadata()
 {
   // Entry points:
   {
@@ -332,41 +334,6 @@ Module::readMetadata()
 	    Compare());
       }
     }
-  }
-}
-
-void
-Module::writeMetadata()
-{
-  auto& llcontext = d_llmodule->getContext();
-
-  // Entry points
-  {
-    llvm::NamedMDNode *vertex = nullptr, *fragment = nullptr;
-
-    std::for_each(getEntryPointList().begin(), getEntryPointList().end(),
-		  [&](auto& entry_point) -> void {
-		    switch (entry_point.getKind()) {
-		    case EntryPoint::Vertex: {
-		      std::vector<llvm::Metadata *> operands;
-
-		      // The function:
-		      operands.push_back(llvm::ValueAsMetadata::getConstant(entry_point.getFunction()));
-
-		      auto entry_point_md = llvm::MDTuple::get(llcontext, operands);
-		    } break;
-		    case EntryPoint::Fragment: {
-		      std::vector<llvm::Metadata *> operands;
-
-		      // The function:
-		      operands.push_back(llvm::ValueAsMetadata::getConstant(entry_point.getFunction()));
-
-		      auto entry_point_md = llvm::MDTuple::get(llcontext, operands);
-		    } break;
-		    default:
-		      break;
-		    }
-		  });
   }
 }
 

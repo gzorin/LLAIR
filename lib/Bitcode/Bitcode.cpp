@@ -23,8 +23,6 @@ getBitcodeModule(llvm::MemoryBufferRef bitcode, LLAIRContext& context) {
 
   auto module = std::make_unique<llair::Module>(std::move(*llmodule));
 
-  module->readMetadata();
-
   return module;
 }
 
