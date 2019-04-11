@@ -148,7 +148,9 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	src_global_values.begin(), src_global_values.end(),
 	dst_global_values.begin(), dst_global_values.end(),
 	[&global_value_map](auto src_value, auto dst_value) -> void {
-	    if (src_value->isDeclarationForLinker() && dst_value->isStrongDefinitionForLinker()) {
+	    if (src_value->isDeclarationForLinker() &&
+		(dst_value->isStrongDefinitionForLinker() ||
+		 dst_value->isDeclarationForLinker())) {
 		global_value_map[src_value] = dst_value;
 	    }
 	},
