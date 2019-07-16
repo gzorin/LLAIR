@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.14)
 project(LLAIR)
 
 find_package(LLVM REQUIRED CONFIG)
@@ -14,6 +14,10 @@ execute_process(
   COMMAND ${XCRUN} --sdk macosx --find metal
   OUTPUT_VARIABLE METAL
   OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+install(
+  EXPORT LLAIRTargets
+  DESTINATION lib/cmake/llair)
 
 add_subdirectory(include)
 add_subdirectory(lib/Bitcode)
