@@ -25,3 +25,13 @@ add_subdirectory(lib/IR)
 add_subdirectory(lib/Linker)
 add_subdirectory(lib/Tools)
 add_subdirectory(examples)
+
+include(CMakePackageConfigHelpers)
+
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LLAIRConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/LLAIRConfig.cmake
+  INSTALL_DESTINATION lib/cmake/llair)
+
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/LLAIRConfig.cmake
+  DESTINATION lib/cmake/llair)
