@@ -310,9 +310,11 @@ private:
 class FragmentEntryPoint : public EntryPoint {
 public:
 
-  static FragmentEntryPoint * Create(llvm::Function *, unsigned, Module *);
+  static FragmentEntryPoint * Create(llvm::Function *, bool, unsigned, Module *);
 
   ~FragmentEntryPoint();
+
+  bool early_fragment_tests_enabled() const { return d_early_fragment_tests_enabled; }
 
   class Output {
       FragmentEntryPoint *d_parent;
@@ -384,10 +386,12 @@ private:
   friend class Module;
   friend class Output;
 
-  FragmentEntryPoint(llvm::Function *, unsigned, Module *);
+  FragmentEntryPoint(llvm::Function *, bool, unsigned, Module *);
   FragmentEntryPoint(llvm::MDNode *, Module *);
 
   void updateOutputMetadata(Output *);
+
+  bool d_early_fragment_tests_enabled = false;
 
   std::size_t d_output_count = 0;
   Output *d_outputs = nullptr;

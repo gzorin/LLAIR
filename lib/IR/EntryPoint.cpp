@@ -1227,12 +1227,13 @@ VertexEntryPoint::Output::setTypeName(llvm::StringRef type_name) {
 }
 
 // FragmentEntryPoint
-FragmentEntryPoint * FragmentEntryPoint::Create(llvm::Function *function, unsigned output_count, Module *module) {
-  return new FragmentEntryPoint(function, output_count, module);
+FragmentEntryPoint * FragmentEntryPoint::Create(llvm::Function *function, bool early_fragment_tests_enabled, unsigned output_count, Module *module) {
+  return new FragmentEntryPoint(function, early_fragment_tests_enabled, output_count, module);
 }
 
-FragmentEntryPoint::FragmentEntryPoint(llvm::Function *function, unsigned output_count, Module *module)
-: EntryPoint(EntryPoint::Fragment, function, module) {
+FragmentEntryPoint::FragmentEntryPoint(llvm::Function *function, bool early_fragment_tests_enabled, unsigned output_count, Module *module)
+: EntryPoint(EntryPoint::Fragment, function, module)
+, d_early_fragment_tests_enabled(early_fragment_tests_enabled) {
   d_output_count = output_count;
 
   d_outputs = std::allocator<Output>().allocate(d_output_count);
@@ -1260,12 +1261,23 @@ FragmentEntryPoint::FragmentEntryPoint(llvm::Function *function, unsigned output
   d_outputs_md.reset(
       llvm::MDTuple::get(ll_context, mds));
 
-  d_md.reset(
+  if (d_early_fragment_tests_enabled) {
+	d_md.reset(
+      llvm::MDTuple::get(ll_context, {
+	      d_function_md.get(),
+	      d_outputs_md.get(),
+	      d_arguments_md.get(),
+		  llvm::MDString::get(ll_context, "early_fragment_tests")
+	  }));
+  }
+  else {
+	d_md.reset(
       llvm::MDTuple::get(ll_context, {
 	      d_function_md.get(),
 	      d_outputs_md.get(),
 	      d_arguments_md.get()
 	  }));
+  }
 
   if (module) {
     module->getEntryPointList().push_back(this);
@@ -1278,6 +1290,19 @@ FragmentEntryPoint::FragmentEntryPoint(llvm::MDNode *md, Module *module)
     md,
     module)
 , d_outputs(nullptr) {
+  for (auto it = d_md->op_begin(), it_end = d_md->op_end(); it != it_end;) {
+	auto string_md = llvm::dyn_cast<llvm::MDString>(it++->get());
+	if (!string_md) {
+		continue;
+	}
+
+	auto keyword = string_md->getString();
+
+	if (keyword == "early_fragment_tests") {
+		d_early_fragment_tests_enabled = true;
+	}
+  }
+
   // Outputs:
   d_outputs_md.reset(
       llvm::cast<llvm::MDTuple>(d_md->getOperand(1).get()));
