@@ -107,7 +107,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	    dst_types.insert(src);
 	});
 
-    // Map global values declared in 'src' to global values defined in 'dst':
+	// Collect global values in both 'src' and 'dst':
     std::vector<const llvm::GlobalValue *> src_global_values;
 
     std::transform(
@@ -136,35 +136,50 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	    return lhs->getName() < rhs->getName();
 	});
 
-    llvm::DenseMap<const llvm::GlobalValue *, llvm::GlobalValue *> global_value_map;
-
     struct CompareGlobalValues {
-	bool operator()(const llvm::GlobalValue *src_value, const llvm::GlobalValue *dst_value) const {
-	    return src_value->getName() < dst_value->getName();
-	}
+		bool operator()(const llvm::GlobalValue *src_value, const llvm::GlobalValue *dst_value) const {
+	    	return src_value->getName() < dst_value->getName();
+		}
     };
 
+	// Map global values declared in 'src' to global values defined in 'dst':
+	llvm::DenseMap<const llvm::GlobalValue *, llvm::GlobalValue *> src_to_dst_global_value_map;
+
     for_each_intersection(
-	src_global_values.begin(), src_global_values.end(),
-	dst_global_values.begin(), dst_global_values.end(),
-	[&global_value_map](auto src_value, auto dst_value) -> void {
-	    if (src_value->isDeclarationForLinker() &&
-		(dst_value->isStrongDefinitionForLinker() ||
-		 dst_value->isDeclarationForLinker())) {
-		global_value_map[src_value] = dst_value;
-	    }
-	},
-	CompareGlobalValues());
+		src_global_values.begin(), src_global_values.end(),
+		dst_global_values.begin(), dst_global_values.end(),
+		[&src_to_dst_global_value_map](auto src_value, auto dst_value) -> void {
+			if (src_value->isDeclarationForLinker() &&
+				(dst_value->isStrongDefinitionForLinker() ||
+				 dst_value->isDeclarationForLinker())) {
+				src_to_dst_global_value_map[src_value] = dst_value;
+			}
+		},
+		CompareGlobalValues());
+
+	// Map global values declared in 'dst' to global values defined in 'src':
+	llvm::DenseMap<llvm::GlobalValue *, const llvm::GlobalValue *> dst_to_src_global_value_map;
+
+    for_each_intersection(
+		dst_global_values.begin(), dst_global_values.end(),
+		src_global_values.begin(), src_global_values.end(),
+		[&dst_to_src_global_value_map](auto dst_value, auto src_value) -> void {
+			if (dst_value->isDeclarationForLinker() &&
+				src_value->isStrongDefinitionForLinker()) {
+				dst_to_src_global_value_map[dst_value] = src_value;
+			}
+		},
+		CompareGlobalValues());
 
     // Now clone 'src' into 'dst':
     class TypeMapper : public llvm::ValueMapTypeRemapper {
     public:
-	
+
 	TypeMapper(llvm::LLVMContext& context, llvm::DenseMap<llvm::Type *, llvm::Type *>& type_map)
 	    : d_context(context)
 	    , d_type_map(type_map) {
 	}
-	
+
 	// llvm::ValueMapTypeRemapper overrides:
 	llvm::Type *remapType(llvm::Type *SrcTy) override {
 	    // Search the type map:
@@ -174,19 +189,19 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 		    return it->second;
 		}
 	    }
-	    
+
 	    llvm::Type *RemappedTy = SrcTy;
-	    
+
 	    // Remap contained types:
 	    std::vector<llvm::Type *> RemappedContainedTys(SrcTy->getNumContainedTypes(), nullptr);
-	    
+
 	    std::transform(
 		SrcTy->subtype_begin(), SrcTy->subtype_end(),
 		RemappedContainedTys.begin(),
 		[&](auto ContainedTy) -> llvm::Type * {
 		    return remapType(ContainedTy);
 		});
-	    
+
 	    // Are any contained types remapped?
 	    if (!std::equal(
 		    SrcTy->subtype_begin(), SrcTy->subtype_end(),
@@ -219,13 +234,13 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 		    break;
 		}
 	    }
-	    
+
 	    // Cache it no matter what:
 	    d_type_map[SrcTy] = RemappedTy;
-	    
+
 	    return RemappedTy;
 	}
-	
+
     private:
 
 	llvm::LLVMContext& d_context;
@@ -238,7 +253,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
     auto M = src->getLLModule();
     auto New = dst->getLLModule();
-   
+
     // Loop over all of the global variables, making corresponding globals in the
     // new module.  Here we add them to the VMap and to the new Module.  We
     // don't worry about attributes or initializers, they will come later.
@@ -248,14 +263,14 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	GlobalVariable *GV = nullptr;
 
 	if (I->isDeclaration()) {
-	    auto it = global_value_map.find(&*I);
-	    if (it != global_value_map.end()) {
+	    auto it = src_to_dst_global_value_map.find(&*I);
+	    if (it != src_to_dst_global_value_map.end()) {
 		GV = llvm::cast<GlobalVariable>(it->second);
 	    }
 	}
 
 	if (!GV) {
-	    GV = new GlobalVariable(*New, 
+	    GV = new GlobalVariable(*New,
 				    TMap.remapType(I->getValueType()),
 				    I->isConstant(), I->getLinkage(),
 				    (Constant*) nullptr, I->getName(),
@@ -264,7 +279,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 				    I->getType()->getAddressSpace());
 	    GV->copyAttributesFrom(&*I);
 	}
-	
+
 	VMap[&*I] = GV;
     }
 
@@ -273,39 +288,39 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	if (!I.isDeclaration()) {
 	    continue;
 	}
-	
+
 	Function *NF = nullptr;
-	
+
 	// If calling a member of 'function_map', rewrite the declaration:
 	if (!NF) {
-	    auto it = global_value_map.find(&I);
-	    if (it != global_value_map.end()) {
+	    auto it = src_to_dst_global_value_map.find(&I);
+	    if (it != src_to_dst_global_value_map.end()) {
 		NF = llvm::cast<Function>(it->second);
 	    }
 	}
-	
+
 	if (!NF) {
 	    NF = Function::Create(cast<FunctionType>(TMap.remapType(I.getValueType())),
 				  I.getLinkage(), I.getName(), New);
 	    NF->copyAttributesFrom(&I);
 	}
-	
+
 	VMap[&I] = NF;
     }
-    
+
     // Loop over function definitions:
     for (const Function &I : *M) {
 	if (I.isDeclaration()) {
 	    continue;
 	}
-	
+
 	Function *NF = nullptr;
-	
+
 	if (!NF) {
 	    NF = Function::Create(cast<FunctionType>(TMap.remapType(I.getValueType())),
 				  I.getLinkage(), I.getName(), New);
 	}
-	
+
 	NF->copyAttributesFrom(&I);
 	VMap[&I] = NF;
     }
@@ -319,7 +334,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	GA->copyAttributesFrom(&*I);
 	VMap[&*I] = GA;
     }
-    
+
     // Now that all of the things that global variable initializer can refer to
     // have been created, loop through and copy the global variable referrers
     // over...  We also set the attributes on the global now.
@@ -328,45 +343,57 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	 I != E; ++I) {
 	if (I->isDeclaration())
 	    continue;
-	
+
 	GlobalVariable *GV = cast<GlobalVariable>(VMap[&*I]);
 	if (I->hasInitializer())
 	    GV->setInitializer(MapValue(I->getInitializer(), VMap));
-	
+
 	SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
 	I->getAllMetadata(MDs);
 	for (auto MD : MDs)
 	    GV->addMetadata(MD.first,
 			    *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs));
-	
+
 	copyComdat(GV, &*I);
     }
-    
+
     // Similarly, copy over function bodies now...
     //
     for (const Function &I : *M) {
 	if (I.isDeclaration())
 	    continue;
-	
+
 	Function *F = cast<Function>(VMap[&I]);
-	
+
 	Function::arg_iterator DestI = F->arg_begin();
 	for (Function::const_arg_iterator J = I.arg_begin(); J != I.arg_end();
 	     ++J) {
 	    DestI->setName(J->getName());
 	    VMap[&*J] = &*DestI++;
 	}
-	
+
 	SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
 	CloneFunctionInto(F, &I, VMap, /*ModuleLevelChanges=*/true, Returns,
 			  "", nullptr, &TMap);
-	
+
 	if (I.hasPersonalityFn())
 	    F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap));
-	
+
 	copyComdat(F, &I);
     }
-    
+
+	// Replace functions declared in 'dst' with the definitions copied from 'src':
+	//
+	std::for_each(
+		dst_to_src_global_value_map.begin(), dst_to_src_global_value_map.end(),
+		[&VMap](auto tmp) -> void {
+			auto [ dst, src ] = tmp;
+			auto mapped_src = VMap[src];
+
+			dst->replaceAllUsesWith(mapped_src);
+			dst->eraseFromParent();
+		});
+
     // And aliases
     for (llvm::Module::const_alias_iterator I = M->alias_begin(), E = M->alias_end();
 	 I != E; ++I) {
@@ -374,7 +401,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 	if (const Constant *C = I->getAliasee())
 	    GA->setAliasee(MapValue(C, VMap));
     }
-    
+
     // And named metadata....
     static const std::set<llvm::StringRef> s_once_metadata_names = {
 	"air.version",
