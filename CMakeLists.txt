@@ -19,6 +19,7 @@ install(
   EXPORT LLAIRTargets
   DESTINATION lib/cmake/llair)
 
+add_subdirectory(extsrc/llvm-demangle)
 add_subdirectory(include)
 add_subdirectory(lib/Bitcode)
 add_subdirectory(lib/IR)
