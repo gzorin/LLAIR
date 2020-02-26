@@ -1,0 +1,19 @@
+llvm_map_components_to_libnames(LLVM_LIBRARIES core support bitreader bitwriter transformutils)
+
+add_executable(llair-link
+  llair-link.cpp)
+
+target_compile_features(llair-link PUBLIC cxx_std_17)
+
+target_include_directories(llair-link BEFORE
+  PRIVATE
+  ${CMAKE_SOURCE_DIR}/include)
+
+target_include_directories(llair-link
+  PUBLIC
+  ${LLAIR_DEPS_DIR}/include
+  ${LLVM_INCLUDE_DIRS})
+
+target_link_libraries(llair-link
+  LLAIR LLAIRBitcode LLAIRLinker
+  ${LLVM_LIBRARIES})
