@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <numeric>
 #include <utility>
 
@@ -2867,6 +2868,10 @@ AbstractManglingParser<Derived, Alloc>::parseNestedName(NameState *State) {
   if (!consumeIf('N'))
     return nullptr;
 
+  if (consumeIf('U')) {
+    StringView Qual = parseBareSourceName();
+  }
+
   Qualifiers CVTmp = parseCVQualifiers();
   if (State) State->CVQualifiers = CVTmp;
 
@@ -4851,10 +4856,11 @@ Node *AbstractManglingParser<Derived, Alloc>::parseEncoding() {
       return nullptr;
   }
 
-  if (consumeIf('v'))
+  if (consumeIf('v')) {
     return make<FunctionEncoding>(ReturnType, Name, NodeArray(),
                                   Attrs, NameInfo.CVQualifiers,
                                   NameInfo.ReferenceQualifier);
+  }
 
   size_t ParamsBegin = Names.size();
   do {

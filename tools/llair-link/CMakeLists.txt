@@ -7,7 +7,7 @@ target_compile_features(llair-link PUBLIC cxx_std_17)
 
 target_include_directories(llair-link BEFORE
   PRIVATE
-  ${CMAKE_SOURCE_DIR}/include)
+  ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/extsrc/llvm-demangle/include)
 
 target_include_directories(llair-link
   PUBLIC
@@ -15,5 +15,5 @@ target_include_directories(llair-link
   ${LLVM_INCLUDE_DIRS})
 
 target_link_libraries(llair-link
-  LLAIR LLAIRBitcode LLAIRLinker
+  LLAIR LLAIRBitcode LLAIRLinker LLVMDemangleLib
   ${LLVM_LIBRARIES})
