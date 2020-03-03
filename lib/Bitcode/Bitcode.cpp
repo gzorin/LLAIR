@@ -7,23 +7,23 @@
 namespace llair {
 
 llvm::Expected<std::unique_ptr<llair::Module>>
-getBitcodeModule(llvm::MemoryBufferRef bitcode, LLAIRContext& context) {
+getBitcodeModule(llvm::MemoryBufferRef bitcode, LLAIRContext &context) {
 
-  auto llmodule = llvm::getLazyBitcodeModule(bitcode, context.getLLContext());
+    auto llmodule = llvm::getLazyBitcodeModule(bitcode, context.getLLContext());
 
-  if (!llmodule) {
-    return llmodule.takeError();
-  }
+    if (!llmodule) {
+        return llmodule.takeError();
+    }
 
-  auto error = (*llmodule)->materializeAll();
+    auto error = (*llmodule)->materializeAll();
 
-  if (error) {
-    return std::move(error);
-  }
+    if (error) {
+        return std::move(error);
+    }
 
-  auto module = std::make_unique<llair::Module>(std::move(*llmodule));
+    auto module = std::make_unique<llair::Module>(std::move(*llmodule));
 
-  return module;
+    return module;
 }
 
 } // End namespace llair

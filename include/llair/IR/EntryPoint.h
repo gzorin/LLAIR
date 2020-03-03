@@ -3,8 +3,8 @@
 #define LLAIR_IR_ENTRYPOINT
 
 #include <llvm/ADT/ArrayRef.h>
-#include <llvm/ADT/ilist_node.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/ilist_node.h>
 #include <llvm/IR/TrackingMDRef.h>
 #include <llvm/Support/Casting.h>
 
@@ -16,8 +16,8 @@ class Argument;
 class Function;
 class MDNode;
 class Metadata;
-template<typename ValueSubClass> class SymbolTableListTraits;
-}
+template <typename ValueSubClass> class SymbolTableListTraits;
+} // namespace llvm
 
 namespace llair {
 
@@ -25,390 +25,383 @@ class Module;
 
 class EntryPoint : public llvm::ilist_node<EntryPoint> {
 public:
-
-  enum EntryPointKind {
-    Vertex = 0,
-    Fragment,
-    Compute
-  };
+    enum EntryPointKind { Vertex = 0, Fragment, Compute };
 
 private:
-
-  EntryPointKind d_kind;
+    EntryPointKind d_kind;
 
 public:
+    EntryPointKind getKind() const { return d_kind; }
 
-  EntryPointKind getKind() const { return d_kind; }
+    static const EntryPoint *Get(const llvm::Function *);
+    static EntryPoint *      Get(llvm::Function *);
 
-  static const EntryPoint*  Get(const llvm::Function *);
-  static EntryPoint*        Get(llvm::Function *);
+    virtual ~EntryPoint();
 
-  virtual ~EntryPoint();
+    const Module *getModule() const { return d_module; }
+    Module *      getModule() { return d_module; }
 
-  const Module         *getModule() const { return d_module; }
-  Module               *getModule()       { return d_module; }
+    const llvm::Function *getFunction() const;
+    llvm::Function *      getFunction();
 
-  const llvm::Function *getFunction() const;
-  llvm::Function       *getFunction();
+    void setFunction(llvm::Function *function);
 
-  void                  setFunction(llvm::Function *function);
+    llvm::StringRef getName() const;
 
-  llvm::StringRef       getName() const;
+    class Argument {
+        EntryPoint *d_parent;
 
-  class Argument {
-      EntryPoint *d_parent;
+    public:
+        const llvm::Argument *getFunctionArgument() const { return d_function_argument; }
+        llvm::Argument *      getFunctionArgument() { return d_function_argument; }
 
-  public:
+        unsigned getArgNo() const;
 
-      const llvm::Argument *getFunctionArgument() const { return d_function_argument; }
-      llvm::Argument       *getFunctionArgument()       { return d_function_argument; }
+        llvm::StringRef getName() const;
+        void            setName(llvm::StringRef);
 
-      unsigned getArgNo() const;
+        const EntryPoint *getParent() const { return d_parent; }
+        EntryPoint *      getParent() { return d_parent; }
 
-      llvm::StringRef getName() const;
-      void            setName(llvm::StringRef);
+        llvm::StringRef getTypeName() const;
+        void            setTypeName(llvm::StringRef);
 
-      const EntryPoint *getParent() const { return d_parent; }
-      EntryPoint       *getParent()       { return d_parent; }
+        enum class Interpolation {
+            kCenterPerspective,
+            kCenterNoPerspective,
+            kCentroidPerspective,
+            kCentroidNoPerspective,
+            kSamplePerspective,
+            kSampleNoPerspective,
+            kFlat
+        };
 
-      llvm::StringRef getTypeName() const;
-      void            setTypeName(llvm::StringRef);
+        enum class Access { kReadOnly, kReadWrite };
 
-      enum class Interpolation {
-	  kCenterPerspective,
-	  kCenterNoPerspective,
-	  kCentroidPerspective,
-	  kCentroidNoPerspective,
-	  kSamplePerspective,
-	  kSampleNoPerspective,
-	  kFlat
-      };
+        // Buffer:
+        struct Buffer {
+            unsigned int location0 = 0, location1 = 0;
+            Access       access;
+            unsigned int type_size = 0, type_align_size = 0;
+        };
 
-      enum class Access {
-	  kReadOnly,
-	  kReadWrite
-      };
+        void          InitDetailsAsBuffer(const Buffer &buffer);
+        void          InitDetailsAsBuffer(unsigned int, unsigned int, Access);
+        bool          AreDetailsBuffer() const { return std::holds_alternative<Buffer>(d_details); }
+        const Buffer *GetDetailsAsBuffer() const { return std::get_if<Buffer>(&d_details); }
+        Buffer *      GetDetailsAsBuffer() { return std::get_if<Buffer>(&d_details); }
 
-      // Buffer:
-      struct Buffer {
-	  unsigned int location0 = 0, location1 = 0;
-	  Access access;
-	  unsigned int type_size = 0, type_align_size = 0;
-      };
+        // IndirectBuffer ("argument buffer"):
+        struct IndirectBuffer {
+            unsigned int location0 = 0, location1 = 0;
+            Access       access;
+            unsigned int type_size = 0, type_align_size = 0;
+        };
 
-      void InitDetailsAsBuffer(const Buffer& buffer);
-      void InitDetailsAsBuffer(unsigned int, unsigned int, Access);
-      bool AreDetailsBuffer() const { return std::holds_alternative<Buffer>(d_details); }
-      const Buffer *GetDetailsAsBuffer() const { return std::get_if<Buffer>(&d_details); }
-      Buffer       *GetDetailsAsBuffer()       { return std::get_if<Buffer>(&d_details); }
+        void InitDetailsAsIndirectBuffer(const IndirectBuffer &buffer);
+        void InitDetailsAsIndirectBuffer(unsigned int, unsigned int, Access);
+        bool AreDetailsIndirectBuffer() const {
+            return std::holds_alternative<IndirectBuffer>(d_details);
+        }
+        const IndirectBuffer *GetDetailsAsIndirectBuffer() const {
+            return std::get_if<IndirectBuffer>(&d_details);
+        }
+        IndirectBuffer *GetDetailsAsIndirectBuffer() {
+            return std::get_if<IndirectBuffer>(&d_details);
+        }
 
-      // IndirectBuffer ("argument buffer"):
-      struct IndirectBuffer {
-	  unsigned int location0 = 0, location1 = 0;
-	  Access access;
-	  unsigned int type_size = 0, type_align_size = 0;
-      };
+        // Texture:
+        struct Texture {
+            unsigned int location0 = 0, location1 = 0;
+            Access       access;
+        };
 
-      void InitDetailsAsIndirectBuffer(const IndirectBuffer& buffer);
-      void InitDetailsAsIndirectBuffer(unsigned int, unsigned int, Access);
-      bool AreDetailsIndirectBuffer() const { return std::holds_alternative<IndirectBuffer>(d_details); }
-      const IndirectBuffer *GetDetailsAsIndirectBuffer() const { return std::get_if<IndirectBuffer>(&d_details); }
-      IndirectBuffer       *GetDetailsAsIndirectBuffer()       { return std::get_if<IndirectBuffer>(&d_details); }
+        void InitDetailsAsTexture(const Texture &texture);
+        bool AreDetailsTexture() const { return std::holds_alternative<Texture>(d_details); }
+        const Texture *GetDetailsAsTexture() const { return std::get_if<Texture>(&d_details); }
+        Texture *      GetDetailsAsTexture() { return std::get_if<Texture>(&d_details); }
 
-      // Texture:
-      struct Texture {
-	  unsigned int location0 = 0, location1 = 0;
-	  Access access;
-      };
+        // Vertex stage input:
+        struct VertexInput {
+            unsigned int location0 = 0, location1 = 0;
+            std::string  identifier;
+        };
 
-      void InitDetailsAsTexture(const Texture& texture);
-      bool AreDetailsTexture() const { return std::holds_alternative<Texture>(d_details); }
-      const Texture *GetDetailsAsTexture() const { return std::get_if<Texture>(&d_details); }
-      Texture       *GetDetailsAsTexture()       { return std::get_if<Texture>(&d_details); }
+        void InitDetailsAsVertexInput(const VertexInput &vertex_input);
+        bool AreDetailsVertexInput() const {
+            return std::holds_alternative<VertexInput>(d_details);
+        }
+        const VertexInput *GetDetailsAsVertexInput() const {
+            return std::get_if<VertexInput>(&d_details);
+        }
+        VertexInput *GetDetailsAsVertexInput() { return std::get_if<VertexInput>(&d_details); }
 
-      // Vertex stage input:
-      struct VertexInput {
-	  unsigned int location0 = 0, location1 = 0;
-	  std::string identifier;
-      };
+        // Position:
+        struct Position {
+            Interpolation interpolation;
+        };
 
-      void InitDetailsAsVertexInput(const VertexInput& vertex_input);
-      bool AreDetailsVertexInput() const { return std::holds_alternative<VertexInput>(d_details); }
-      const VertexInput *GetDetailsAsVertexInput() const { return std::get_if<VertexInput>(&d_details); }
-      VertexInput       *GetDetailsAsVertexInput()       { return std::get_if<VertexInput>(&d_details); }
+        void InitDetailsAsPosition(const Position &position);
+        bool AreDetailsPosition() const { return std::holds_alternative<Position>(d_details); }
+        const Position *GetDetailsAsPosition() const { return std::get_if<Position>(&d_details); }
+        Position *      GetDetailsAsPosition() { return std::get_if<Position>(&d_details); }
 
-      // Position:
-      struct Position {
-	  Interpolation interpolation;
-      };
+        // Fragment stage input:
+        struct FragmentInput {
+            std::string   identifier;
+            Interpolation interpolation;
+        };
 
-      void InitDetailsAsPosition(const Position& position);
-      bool AreDetailsPosition() const { return std::holds_alternative<Position>(d_details); }
-      const Position *GetDetailsAsPosition() const { return std::get_if<Position>(&d_details); }
-      Position       *GetDetailsAsPosition()       { return std::get_if<Position>(&d_details); }
+        void InitDetailsAsFragmentInput(const FragmentInput &fragment_input);
+        bool AreDetailsFragmentInput() const {
+            return std::holds_alternative<FragmentInput>(d_details);
+        }
+        const FragmentInput *GetDetailsAsFragmentInput() const {
+            return std::get_if<FragmentInput>(&d_details);
+        }
+        FragmentInput *GetDetailsAsFragmentInput() {
+            return std::get_if<FragmentInput>(&d_details);
+        }
 
-      // Fragment stage input:
-      struct FragmentInput {
-	  std::string identifier;
-	  Interpolation interpolation;
-      };
+    private:
+        friend class EntryPoint;
 
-      void InitDetailsAsFragmentInput(const FragmentInput& fragment_input);
-      bool AreDetailsFragmentInput() const { return std::holds_alternative<FragmentInput>(d_details); }
-      const FragmentInput *GetDetailsAsFragmentInput() const { return std::get_if<FragmentInput>(&d_details); }
-      FragmentInput       *GetDetailsAsFragmentInput()       { return std::get_if<FragmentInput>(&d_details); }
+        Argument(llvm::Argument *, EntryPoint * = nullptr);
+        Argument(llvm::Argument *, llvm::MDTuple *md, EntryPoint *);
 
-  private:
+        void updateMetadataInEntryPoint();
 
-      friend class EntryPoint;
+        llvm::Argument *d_function_argument;
 
-      Argument(llvm::Argument *, EntryPoint * = nullptr);
-      Argument(llvm::Argument *, llvm::MDTuple *md, EntryPoint *);
+        llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
+        unsigned                                d_md_index = 0;
 
-      void updateMetadataInEntryPoint();
+        llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
 
-      llvm::Argument *d_function_argument;
+        std::variant<std::monostate, Buffer, IndirectBuffer, Texture, Position, VertexInput,
+                     FragmentInput>
+            d_details;
+    };
 
-      llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
-      unsigned d_md_index = 0;
+    using arg_iterator       = Argument *;
+    using const_arg_iterator = const Argument *;
 
-      llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
+    arg_iterator       arg_begin() { return d_arguments; }
+    const arg_iterator arg_begin() const { return d_arguments; }
 
-      std::variant<std::monostate, Buffer, IndirectBuffer, Texture, Position, VertexInput, FragmentInput> d_details;
-  };
+    arg_iterator       arg_end() { return d_arguments + arg_size(); }
+    const arg_iterator arg_end() const { return d_arguments + arg_size(); }
 
-  using arg_iterator = Argument *;
-  using const_arg_iterator = const Argument *;
+    std::size_t arg_size() const;
 
-  arg_iterator arg_begin() { return d_arguments; }
-  const arg_iterator arg_begin() const { return d_arguments; }
-
-  arg_iterator arg_end() { return d_arguments + arg_size(); }
-  const arg_iterator arg_end() const { return d_arguments + arg_size(); }
-
-  std::size_t arg_size() const;
-
-  llvm::MDNode *metadata() { return d_md.get(); }
-  const llvm::MDNode *metadata() const { return d_md.get(); }
+    llvm::MDNode *      metadata() { return d_md.get(); }
+    const llvm::MDNode *metadata() const { return d_md.get(); }
 
 protected:
+    EntryPoint(EntryPointKind, llvm::Function *, Module *);
+    EntryPoint(EntryPointKind, llvm::MDNode *, Module *);
 
-  EntryPoint(EntryPointKind, llvm::Function *, Module *);
-  EntryPoint(EntryPointKind, llvm::MDNode *, Module *);
+    std::size_t d_argument_count = 0;
+    Argument *  d_arguments;
 
-  std::size_t d_argument_count = 0;
-  Argument *d_arguments;
+    Module *d_module;
 
-  Module *d_module;
-
-  llvm::TypedTrackingMDRef<llvm::MDNode> d_md;
-  llvm::TypedTrackingMDRef<llvm::ValueAsMetadata> d_function_md;
-  llvm::TypedTrackingMDRef<llvm::MDTuple> d_arguments_md;
+    llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
+    llvm::TypedTrackingMDRef<llvm::ValueAsMetadata> d_function_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple>         d_arguments_md;
 
 private:
+    void setModule(Module *);
+    void updateArgumentMetadata(Argument *);
 
-  void setModule(Module *);
-  void updateArgumentMetadata(Argument *);
-
-  friend class llvm::SymbolTableListTraits<EntryPoint>;
-  friend class EntryPoint;
+    friend class llvm::SymbolTableListTraits<EntryPoint>;
+    friend class EntryPoint;
 };
 
 class VertexEntryPoint : public EntryPoint {
 public:
+    static VertexEntryPoint *Create(llvm::Function *, unsigned, Module *);
 
-  static VertexEntryPoint * Create(llvm::Function *, unsigned, Module *);
+    ~VertexEntryPoint();
 
-  ~VertexEntryPoint();
+    class Output {
+        VertexEntryPoint *d_parent;
 
-  class Output {
-      VertexEntryPoint *d_parent;
+    public:
+        llvm::StringRef getName() const;
+        void            setName(llvm::StringRef);
 
-  public:
+        const VertexEntryPoint *getParent() const { return d_parent; }
+        VertexEntryPoint *      getParent() { return d_parent; }
 
-      llvm::StringRef getName() const;
-      void            setName(llvm::StringRef);
+        llvm::StringRef getTypeName() const;
+        void            setTypeName(llvm::StringRef);
 
-      const VertexEntryPoint *getParent() const { return d_parent; }
-      VertexEntryPoint       *getParent()       { return d_parent; }
+        enum class Interpolation {
+            kCenterPerspective,
+            kCenterNoPerspective,
+            kCentroidPerspective,
+            kCentroidNoPerspective,
+            kSamplePerspective,
+            kSampleNoPerspective,
+            kFlat
+        };
 
-      llvm::StringRef getTypeName() const;
-      void            setTypeName(llvm::StringRef);
+        // Position:
+        struct Position {};
 
-      enum class Interpolation {
-	  kCenterPerspective,
-	  kCenterNoPerspective,
-	  kCentroidPerspective,
-	  kCentroidNoPerspective,
-	  kSamplePerspective,
-	  kSampleNoPerspective,
-	  kFlat
-      };
+        void            InitDetailsAsPosition(const Position &position);
+        const Position *GetDetailsAsPosition() const { return std::get_if<Position>(&d_details); }
+        Position *      GetDetailsAsPosition() { return std::get_if<Position>(&d_details); }
 
-      // Position:
-      struct Position {
-      };
+        // Vertex output:
+        struct VertexOutput {
+            std::string   identifier;
+            Interpolation interpolation;
+        };
 
-      void InitDetailsAsPosition(const Position& position);
-      const Position *GetDetailsAsPosition() const { return std::get_if<Position>(&d_details); }
-      Position       *GetDetailsAsPosition()       { return std::get_if<Position>(&d_details); }
+        void                InitDetailsAsVertexOutput(const VertexOutput &vertex_output);
+        const VertexOutput *GetDetailsAsVertexOutput() const {
+            return std::get_if<VertexOutput>(&d_details);
+        }
+        VertexOutput *GetDetailsAsVertexOutput() { return std::get_if<VertexOutput>(&d_details); }
 
-      // Vertex output:
-      struct VertexOutput {
-	  std::string identifier;
-	  Interpolation interpolation;
-      };
+    private:
+        friend class VertexEntryPoint;
 
-      void InitDetailsAsVertexOutput(const VertexOutput& vertex_output);
-      const VertexOutput *GetDetailsAsVertexOutput() const { return std::get_if<VertexOutput>(&d_details); }
-      VertexOutput       *GetDetailsAsVertexOutput()       { return std::get_if<VertexOutput>(&d_details); }
+        Output(VertexEntryPoint * = nullptr);
+        Output(llvm::MDTuple *md, VertexEntryPoint *);
 
-  private:
+        void updateMetadataInEntryPoint();
 
-      friend class VertexEntryPoint;
+        llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
+        unsigned                                d_md_index = 0;
 
-      Output(VertexEntryPoint * = nullptr);
-      Output(llvm::MDTuple *md, VertexEntryPoint *);
+        llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
 
-      void updateMetadataInEntryPoint();
+        std::variant<std::monostate, Position, VertexOutput> d_details;
+    };
 
-      llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
-      unsigned d_md_index = 0;
+    using output_iterator       = Output *;
+    using const_output_iterator = const Output *;
 
-      llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
+    output_iterator       output_begin() { return d_outputs; }
+    const output_iterator output_begin() const { return d_outputs; }
 
-      std::variant<std::monostate, Position, VertexOutput> d_details;
-  };
+    output_iterator       output_end() { return d_outputs + output_size(); }
+    const output_iterator output_end() const { return d_outputs + output_size(); }
 
-  using output_iterator = Output *;
-  using const_output_iterator = const Output *;
-
-  output_iterator output_begin() { return d_outputs; }
-  const output_iterator output_begin() const { return d_outputs; }
-
-  output_iterator output_end() { return d_outputs + output_size(); }
-  const output_iterator output_end() const { return d_outputs + output_size(); }
-
-  std::size_t output_size() const;
+    std::size_t output_size() const;
 
 private:
+    friend class Module;
+    friend class Output;
 
-  friend class Module;
-  friend class Output;
+    VertexEntryPoint(llvm::Function *, unsigned, Module *);
+    VertexEntryPoint(llvm::MDNode *, Module *);
 
-  VertexEntryPoint(llvm::Function *, unsigned, Module *);
-  VertexEntryPoint(llvm::MDNode *, Module *);
+    void updateOutputMetadata(Output *);
 
-  void updateOutputMetadata(Output *);
+    std::size_t d_output_count = 0;
+    Output *    d_outputs      = nullptr;
 
-  std::size_t d_output_count = 0;
-  Output *d_outputs = nullptr;
-
-  llvm::TypedTrackingMDRef<llvm::MDTuple> d_outputs_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple> d_outputs_md;
 };
 
 class FragmentEntryPoint : public EntryPoint {
 public:
+    static FragmentEntryPoint *Create(llvm::Function *, bool, unsigned, Module *);
 
-  static FragmentEntryPoint * Create(llvm::Function *, bool, unsigned, Module *);
+    ~FragmentEntryPoint();
 
-  ~FragmentEntryPoint();
+    bool early_fragment_tests_enabled() const { return d_early_fragment_tests_enabled; }
 
-  bool early_fragment_tests_enabled() const { return d_early_fragment_tests_enabled; }
+    class Output {
+        FragmentEntryPoint *d_parent;
 
-  class Output {
-      FragmentEntryPoint *d_parent;
+    public:
+        llvm::StringRef getName() const;
+        void            setName(llvm::StringRef);
 
-  public:
+        const FragmentEntryPoint *getParent() const { return d_parent; }
+        FragmentEntryPoint *      getParent() { return d_parent; }
 
-      llvm::StringRef getName() const;
-      void            setName(llvm::StringRef);
+        llvm::StringRef getTypeName() const;
+        void            setTypeName(llvm::StringRef);
 
-      const FragmentEntryPoint *getParent() const { return d_parent; }
-      FragmentEntryPoint       *getParent()       { return d_parent; }
+        // Depth:
+        struct Depth {
+            enum Qualifier { kAny, kGreater, kLess };
+            Qualifier qualifier;
+        };
 
-      llvm::StringRef getTypeName() const;
-      void            setTypeName(llvm::StringRef);
+        void         InitDetailsAsDepth(const Depth &depth);
+        const Depth *GetDetailsAsDepth() const { return std::get_if<Depth>(&d_details); }
+        Depth *      GetDetailsAsDepth() { return std::get_if<Depth>(&d_details); }
 
-      // Depth:
-      struct Depth {
-	  enum Qualifier {
-	      kAny,
-	      kGreater,
-	      kLess
-	  };
-	  Qualifier qualifier;
-      };
+        // Render target:
+        struct RenderTarget {
+            unsigned int location0 = 0, location1 = 0;
+        };
 
-      void InitDetailsAsDepth(const Depth& depth);
-      const Depth *GetDetailsAsDepth() const { return std::get_if<Depth>(&d_details); }
-      Depth       *GetDetailsAsDepth()       { return std::get_if<Depth>(&d_details); }
+        void                InitDetailsAsRenderTarget(const RenderTarget &render_target);
+        const RenderTarget *GetDetailsAsRenderTarget() const {
+            return std::get_if<RenderTarget>(&d_details);
+        }
+        RenderTarget *GetDetailsAsRenderTarget() { return std::get_if<RenderTarget>(&d_details); }
 
-      // Render target:
-      struct RenderTarget {
-	  unsigned int location0 = 0, location1 = 0;
-      };
+    private:
+        friend class FragmentEntryPoint;
 
-      void InitDetailsAsRenderTarget(const RenderTarget& render_target);
-      const RenderTarget *GetDetailsAsRenderTarget() const { return std::get_if<RenderTarget>(&d_details); }
-      RenderTarget       *GetDetailsAsRenderTarget()       { return std::get_if<RenderTarget>(&d_details); }
+        Output(FragmentEntryPoint * = nullptr);
+        Output(llvm::MDTuple *md, FragmentEntryPoint *);
 
-  private:
+        void updateMetadataInEntryPoint();
 
-      friend class FragmentEntryPoint;
+        llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
+        unsigned                                d_md_index = 0;
 
-      Output(FragmentEntryPoint * = nullptr);
-      Output(llvm::MDTuple *md, FragmentEntryPoint *);
+        llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
 
-      void updateMetadataInEntryPoint();
+        std::variant<std::monostate, Depth, RenderTarget> d_details;
+    };
 
-      llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
-      unsigned d_md_index = 0;
+    using output_iterator       = Output *;
+    using const_output_iterator = const Output *;
 
-      llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
+    output_iterator       output_begin() { return d_outputs; }
+    const output_iterator output_begin() const { return d_outputs; }
 
-      std::variant<std::monostate, Depth, RenderTarget> d_details;
-  };
+    output_iterator       output_end() { return d_outputs + output_size(); }
+    const output_iterator output_end() const { return d_outputs + output_size(); }
 
-  using output_iterator = Output *;
-  using const_output_iterator = const Output *;
-
-  output_iterator output_begin() { return d_outputs; }
-  const output_iterator output_begin() const { return d_outputs; }
-
-  output_iterator output_end() { return d_outputs + output_size(); }
-  const output_iterator output_end() const { return d_outputs + output_size(); }
-
-  std::size_t output_size() const;
+    std::size_t output_size() const;
 
 private:
+    friend class Module;
+    friend class Output;
 
-  friend class Module;
-  friend class Output;
+    FragmentEntryPoint(llvm::Function *, bool, unsigned, Module *);
+    FragmentEntryPoint(llvm::MDNode *, Module *);
 
-  FragmentEntryPoint(llvm::Function *, bool, unsigned, Module *);
-  FragmentEntryPoint(llvm::MDNode *, Module *);
+    void updateOutputMetadata(Output *);
 
-  void updateOutputMetadata(Output *);
+    bool d_early_fragment_tests_enabled = false;
 
-  bool d_early_fragment_tests_enabled = false;
+    std::size_t d_output_count = 0;
+    Output *    d_outputs      = nullptr;
 
-  std::size_t d_output_count = 0;
-  Output *d_outputs = nullptr;
-
-  llvm::TypedTrackingMDRef<llvm::MDTuple> d_outputs_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple> d_outputs_md;
 };
 
 class ComputeEntryPoint : public EntryPoint {
 public:
-
-  static ComputeEntryPoint * Create(llvm::Function *, Module *);
+    static ComputeEntryPoint *Create(llvm::Function *, Module *);
 
 private:
-
-  ComputeEntryPoint(llvm::Function *, Module *);
+    ComputeEntryPoint(llvm::Function *, Module *);
 };
 
-}
+} // namespace llair
 
 #endif

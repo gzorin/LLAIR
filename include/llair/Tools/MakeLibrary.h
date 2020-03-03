@@ -9,12 +9,12 @@
 #include <memory>
 
 namespace llair {
-  class Module;
+class Module;
 
-  void setPathToLibraryTool(llvm::StringRef path);
+void setPathToLibraryTool(llvm::StringRef path);
 
-  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(const Module& module);
-  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(llvm::MemoryBufferRef input);
+llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(const Module &module);
+llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(llvm::MemoryBufferRef input);
 
 } // End namespace llair
 

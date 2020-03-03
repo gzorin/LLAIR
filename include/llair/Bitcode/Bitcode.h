@@ -12,7 +12,8 @@ namespace llair {
 class LLAIRContext;
 class Module;
 
-llvm::Expected<std::unique_ptr<llair::Module>> getBitcodeModule(llvm::MemoryBufferRef bitcode, LLAIRContext& context);
+llvm::Expected<std::unique_ptr<llair::Module>> getBitcodeModule(llvm::MemoryBufferRef bitcode,
+                                                                LLAIRContext &        context);
 
 } // End namespace llair
 

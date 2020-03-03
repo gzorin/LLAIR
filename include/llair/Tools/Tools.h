@@ -5,7 +5,7 @@
 #include <llvm/ADT/StringRef.h>
 
 namespace llair {
-  void setPathToTools(llvm::StringRef path);
+void setPathToTools(llvm::StringRef path);
 } // End namespace llair
 
 #endif

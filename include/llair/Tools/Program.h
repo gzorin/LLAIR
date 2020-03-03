@@ -11,23 +11,25 @@
 #include <memory>
 
 namespace llvm {
-  class MemoryBuffer;
-  class raw_fd_ostream;
-}
+class MemoryBuffer;
+class raw_fd_ostream;
+} // namespace llvm
 
 namespace llair {
 
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> getMemoryBufferForStream(int FD, const llvm::Twine& BufferName);
+llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
+getMemoryBufferForStream(int FD, const llvm::Twine &BufferName);
 
-  struct Program {
-    llvm::sys::ProcessInfo::ProcessId pid;
+struct Program {
+    llvm::sys::ProcessInfo::ProcessId     pid;
     std::unique_ptr<llvm::raw_fd_ostream> input;
-    int output;
-  };
+    int                                   output;
+};
 
-  llvm::ErrorOr<Program> openProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args);
+llvm::ErrorOr<Program> openProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args);
 
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> runProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args, llvm::MemoryBufferRef input);
+llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
+runProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args, llvm::MemoryBufferRef input);
 
 } // End namespace llair
 
