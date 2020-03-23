@@ -412,8 +412,6 @@ main(int argc, char **argv) {
     //    - get the struct type of the first parameter, add it to the set of types that
     //      represent this interface (since named types are not uniqued)
     //    - associate the name of the function with the interface
-    std::vector<const Interface *> interfaces;
-
     std::vector<llvm::Function *> declared_functions, defined_functions;
 
     std::for_each(
@@ -491,7 +489,7 @@ main(int argc, char **argv) {
 
     std::for_each(
         interface_specs.begin(), interface_specs.end(),
-        [&global_namespace, &interface_scope, &interfaces](const auto& tmp) -> void {
+        [&global_namespace, &interface_scope](const auto& tmp) -> void {
             auto [ key, interface_spec ] = tmp;
 
             std::vector<Interface::Method> methods;
@@ -501,18 +499,8 @@ main(int argc, char **argv) {
                 interface_spec.methods.begin(), interface_spec.methods.end(),
                 std::back_inserter(methods));
 
-            std::unique_ptr<Interface> interface(Interface::get(interface_spec.type, methods));
+            auto interface = Interface::get(*interface_scope, interface_spec.type, methods);
             interface->print(llvm::errs());
-
-            auto result = global_namespace.insert(interface_spec.path.begin(), interface_spec.path.end(), std::move(interface));
-
-            if (!result) {
-                return;
-            }
-
-            interface_scope->insertInterface(*result);
-
-            interfaces.push_back(*result);
         });
 
     //

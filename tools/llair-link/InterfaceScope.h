@@ -2,8 +2,13 @@
 #ifndef LLAIR_INTERFACESCOPE_H
 #define LLAIR_INTERFACESCOPE_H
 
+#include "Interface.h"
+
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 
@@ -12,6 +17,7 @@ class Function;
 class LLVMContext;
 class Module;
 class SwitchInst;
+class Type;
 } // End namespace llvm
 
 namespace llair {
@@ -23,10 +29,10 @@ class InterfaceScope {
 public:
 
     InterfaceScope(llvm::StringRef, llvm::LLVMContext&);
+    ~InterfaceScope();
 
     llvm::Module *module() { return d_module.get(); }
 
-    void insertInterface(const Interface *);
     void insertClass(const Class *);
 
     class Implementations {
@@ -79,9 +85,108 @@ public:
 
 private:
 
+    void insertInterface(Interface *);
+
     std::unique_ptr<llvm::Module> d_module;
 
     std::unordered_map<const Interface *, std::unique_ptr<Implementations>> d_interfaces;
+
+    struct InterfaceKeyInfo {
+        struct KeyTy {
+            llvm::StructType *type;
+            llvm::ArrayRef<Interface::Method> methods;
+
+            KeyTy(llvm::StructType *type, llvm::ArrayRef<Interface::Method> methods)
+            : type(type)
+            , methods(methods) {
+            }
+
+            KeyTy(const Interface *interface)
+            : type(interface->getType())
+            , methods(interface->method_begin(), interface->method_end()) {
+            }
+
+            bool operator==(const KeyTy& that) const {
+                if (type != that.type) {
+                    return false;
+                }
+
+                return std::equal(
+                    methods.begin(), methods.end(),
+                    that.methods.begin(), that.methods.end(),
+                    [](const auto& lhs, const auto& rhs) -> bool {
+                        if (lhs.name != rhs.name) {
+                            return false;
+                        }
+                        if (lhs.qualifiedName != rhs.qualifiedName) {
+                            return false;
+                        }
+                        if (lhs.type != rhs.type) {
+                            return false;
+                        }
+
+                        return true;
+                    });
+            }
+
+            bool operator!=(const KeyTy& that) const {
+                return !this->operator==(that);
+            }
+        };
+
+        static inline Interface *getEmptyKey() {
+            return llvm::DenseMapInfo<Interface *>::getEmptyKey();
+        }
+
+        static inline Interface *getTombstoneKey() {
+            return llvm::DenseMapInfo<Interface *>::getTombstoneKey();
+        }
+
+        static unsigned getHashValue(const KeyTy& key) {
+            return llvm::hash_combine(
+                key.type,
+                llvm::hash_combine_range(key.methods.begin(), key.methods.end()));
+        }
+
+        static unsigned getHashValue(const Interface *interface) {
+            return llvm::hash_combine(
+                interface->getType(),
+                llvm::hash_combine_range(interface->method_begin(), interface->method_end()));
+        }
+
+        static bool isEqual(const KeyTy& lhs, const Interface* rhs) {
+            if (rhs == getEmptyKey() || rhs == getTombstoneKey()) {
+                return false;
+            }
+
+            if (lhs.type != rhs->getType()) {
+                return false;
+            }
+
+            return std::equal(
+                lhs.methods.begin(), lhs.methods.end(),
+                rhs->method_begin(), rhs->method_end(),
+                [](const auto& lhs, const auto& rhs) -> bool {
+                    if (lhs.name != rhs.name) {
+                        return false;
+                    }
+                    if (lhs.qualifiedName != rhs.qualifiedName) {
+                        return false;
+                    }
+                    if (lhs.type != rhs.type) {
+                        return false;
+                    }
+
+                    return true;
+                });
+        }
+
+        static bool isEqual(const Interface* lhs, const Interface *rhs) {
+            return lhs == rhs;
+        }
+    };
+
+    llvm::DenseSet<Interface *, InterfaceKeyInfo> d_interfaces_;
 
     struct ClassData {
         uint32_t id = 0;
@@ -99,6 +204,8 @@ private:
 
     std::unordered_multimap<llvm::StringRef, const Interface *, Hash> d_interface_index;
     std::unordered_multimap<llvm::StringRef, const Class *, Hash > d_klass_index;
+
+    friend class Interface;
 };
 
 } // End namespace llair

@@ -1,4 +1,5 @@
 #include "Interface.h"
+#include "InterfaceScope.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/Support/raw_ostream.h>
@@ -7,8 +8,9 @@
 
 namespace llair {
 
-Interface::Interface(llvm::StructType *type, llvm::ArrayRef<Method> methods)
-    : d_type(type)
+Interface::Interface(InterfaceScope& scope, llvm::StructType *type, llvm::ArrayRef<Method> methods)
+    : d_scope(scope)
+    , d_type(type)
     , d_method_count(methods.size()) {
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
@@ -34,8 +36,16 @@ Interface::~Interface() {
 }
 
 Interface *
-Interface::get(llvm::StructType *type, llvm::ArrayRef<Method> methods) {
-    auto interface = new Interface(type, methods);
+Interface::get(InterfaceScope& scope, llvm::StructType *type, llvm::ArrayRef<Method> methods) {
+    auto it = scope.d_interfaces_.find_as(
+        InterfaceScope::InterfaceKeyInfo::KeyTy(type, methods));
+
+    if (it != scope.d_interfaces_.end()) {
+        return *it;
+    }
+
+    auto interface = new Interface(scope, type, methods);
+    scope.insertInterface(interface);
     return interface;
 }
 

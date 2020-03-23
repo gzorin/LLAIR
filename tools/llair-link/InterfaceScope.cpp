@@ -14,8 +14,18 @@ InterfaceScope::InterfaceScope(llvm::StringRef name, llvm::LLVMContext& ll_conte
 : d_module(std::make_unique<llvm::Module>(name, ll_context)) {
 }
 
+InterfaceScope::~InterfaceScope() {
+    std::for_each(
+        d_interfaces_.begin(), d_interfaces_.end(),
+        [](auto interface) {
+            delete interface;
+        });
+}
+
 void
-InterfaceScope::insertInterface(const Interface *interface) {
+InterfaceScope::insertInterface(Interface *interface) {
+    d_interfaces_.insert(interface);
+
     auto implementations = Implementations::create(interface, d_module.get());
 
     auto it_interface = d_interfaces.insert({ interface, std::move(implementations) }).first;
