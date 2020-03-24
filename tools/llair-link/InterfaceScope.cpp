@@ -53,7 +53,7 @@ InterfaceScope::insertInterface(Interface *interface) {
         interface->method_begin(), interface->method_end(),
         std::inserter(d_interface_index, d_interface_index.end()),
         [interface](const auto& method) -> std::pair<llvm::StringRef, const Interface *>{
-            return { method.name, interface };
+            return { method.getName(), interface };
         });
 }
 
@@ -140,7 +140,7 @@ InterfaceScope::Implementations::Implementations(const Interface *interface, llv
             auto builder = std::make_unique<llvm::IRBuilder<>>(context);
 
             auto function = llvm::Function::Create(
-                abstract_method.type, llvm::GlobalValue::ExternalLinkage, abstract_method.qualifiedName,
+                abstract_method.getType(), llvm::GlobalValue::ExternalLinkage, abstract_method.getQualifiedName(),
                 module);
 
             auto block = llvm::BasicBlock::Create(context, "entry", function);
@@ -187,11 +187,11 @@ InterfaceScope::Implementations::addImplementation(const Class *klass, uint32_t 
     auto it_method_function = method_functions.begin();
 
     while (it_interface_method != d_interface->method_end() && it_klass_method != klass->method_end()) {
-        if (it_interface_method->name < it_klass_method->name) {
+        if (it_interface_method->getName() < it_klass_method->name) {
             ++it_interface_method;
             ++it_method;
         } else  {
-            if (!(it_klass_method->name < it_interface_method->name)) {
+            if (!(it_klass_method->name < it_interface_method->getName())) {
                 auto builder = std::make_unique<llvm::IRBuilder<>>(context);
 
                 if (it_method->switcher->getNumCases() == 0) {

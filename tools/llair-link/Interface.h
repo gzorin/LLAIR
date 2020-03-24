@@ -21,13 +21,25 @@ class InterfaceScope;
 class Interface {
 public:
 
-    struct Method {
-        std::string         name;
-        std::string         qualifiedName;
-        llvm::FunctionType *type = nullptr;
+    class Method {
+    public:
+
+        llvm::StringRef     getName()          const { return d_name; }
+        llvm::StringRef     getQualifiedName() const { return d_qualifiedName; }
+        llvm::FunctionType *getType()          const { return d_type; };
+
+    private:
+
+        Method(llvm::StringRef, llvm::StringRef, llvm::FunctionType *);
+
+        std::string         d_name;
+        std::string         d_qualifiedName;
+        llvm::FunctionType *d_type = nullptr;
+
+        friend class Interface;
     };
 
-    static Interface *get(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<Method>);
+    static Interface *get(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
 
     ~Interface();
 
@@ -50,7 +62,7 @@ public:
 
 private:
 
-    Interface(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<Method>);
+    Interface(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
 
     InterfaceScope& d_scope;
 
@@ -59,10 +71,6 @@ private:
     std::size_t d_method_count = 0;
     Method *    d_methods      = nullptr;
 };
-
-inline llvm::hash_code hash_value(const llair::Interface::Method& method) {
-    return llvm::hash_combine(method.name, method.qualifiedName, method.type);
-}
 
 } // End namespace llair
 

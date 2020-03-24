@@ -449,13 +449,18 @@ main(int argc, char **argv) {
         std::vector<llvm::StringRef> path;
         llvm::StructType *type = nullptr;
 
+        struct Method {
+            std::string name, qualifiedName;
+            llvm::FunctionType *type = nullptr;
+        };
+
         struct Compare {
-            bool operator()(const Interface::Method& lhs, const Interface::Method& rhs) const {
+            bool operator()(const Method& lhs, const Method& rhs) const {
                 return lhs.name < rhs.name;
             }
         };
 
-        std::set<Interface::Method, Compare> methods;
+        std::set<Method, Compare> methods;
     };
 
     std::unordered_map<std::string, InterfaceSpec> interface_specs;
@@ -492,14 +497,26 @@ main(int argc, char **argv) {
         [&global_namespace, &interface_scope](const auto& tmp) -> void {
             auto [ key, interface_spec ] = tmp;
 
-            std::vector<Interface::Method> methods;
-            methods.reserve(interface_spec.methods.size());
+            std::vector<llvm::StringRef> names, qualifiedNames;
+            std::vector<llvm::FunctionType *> types;
+            names.reserve(interface_spec.methods.size());
+            qualifiedNames.reserve(interface_spec.methods.size());
+            types.reserve(interface_spec.methods.size());
 
-            std::copy(
+            std::accumulate(
                 interface_spec.methods.begin(), interface_spec.methods.end(),
-                std::back_inserter(methods));
+                std::make_tuple(std::back_inserter(names), std::back_inserter(qualifiedNames), std::back_inserter(types)),
+                [](auto it, const auto& method) -> auto {
+                    auto [ it_name, it_qualifiedName, it_type ] = it;
 
-            auto interface = Interface::get(*interface_scope, interface_spec.type, methods);
+                    *it_name++ = method.name;
+                    *it_qualifiedName++ = method.qualifiedName;
+                    *it_type++ = method.type;
+
+                    return make_tuple(it_name, it_qualifiedName, it_type);
+                });
+
+            auto interface = Interface::get(*interface_scope, interface_spec.type, names, qualifiedNames, types);
             interface->print(llvm::errs());
         });
 
