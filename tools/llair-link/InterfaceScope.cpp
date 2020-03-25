@@ -1,5 +1,6 @@
-#include "Class.h"
 #include "InterfaceScope.h"
+
+#include <llair/IR/Class.h>
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>

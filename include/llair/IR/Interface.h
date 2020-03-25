@@ -1,6 +1,6 @@
 //-*-C++-*-
-#ifndef LLAIR_INTERFACE
-#define LLAIR_INTERFACE
+#ifndef LLAIR_IR_INTERFACE
+#define LLAIR_IR_INTERFACE
 
 #include <llair/IR/LLAIRContext.h>
 

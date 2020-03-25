@@ -18,11 +18,13 @@ class ValueSymbolTable;
 } // End namespace llvm
 
 namespace llair {
+class Class;
 class EntryPoint;
 class Module;
 } // End namespace llair
 
 namespace llvm {
+template <> struct SymbolTableListParentType<llair::Class>      { using type = llair::Module; };
 template <> struct SymbolTableListParentType<llair::EntryPoint> { using type = llair::Module; };
 } // End namespace llvm
 
@@ -31,6 +33,7 @@ namespace llair {
 class Module {
 public:
     using EntryPointListType = llvm::SymbolTableList<EntryPoint>;
+    using ClassListType = llvm::SymbolTableList<Class>;
 
     static const Module *Get(const llvm::Module *);
     static Module *      Get(llvm::Module *);
@@ -72,14 +75,22 @@ public:
     Language getLanguage() const;
 
     //
-    const EntryPointListType &getEntryPointList() const { return d_entry_points; };
-    EntryPointListType &      getEntryPointList() { return d_entry_points; };
+    const EntryPointListType& getEntryPointList() const { return d_entry_points; };
+    EntryPointListType&       getEntryPointList() { return d_entry_points; };
 
     static EntryPointListType Module::*getSublistAccess(EntryPoint *) {
         return &Module::d_entry_points;
     }
 
     EntryPoint *getEntryPoint(llvm::StringRef) const;
+
+    //
+    const ClassListType& getClassList() const { return d_classes; }
+    ClassListType&       getClassList()       { return d_classes; }
+
+    static ClassListType Module::*getSublistAccess(Class *) {
+        return &Module::d_classes;
+    }
 
     //
     void syncMetadata();
@@ -91,6 +102,7 @@ private:
     llvm::TypedTrackingMDRef<llvm::MDTuple> d_version_md, d_language_md;
 
     EntryPointListType d_entry_points;
+    ClassListType d_classes;
 };
 
 } // namespace llair

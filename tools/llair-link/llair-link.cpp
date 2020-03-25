@@ -1,10 +1,10 @@
 #include <llair/Bitcode/Bitcode.h>
+#include <llair/IR/Class.h>
 #include <llair/IR/Interface.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
 
-#include "Class.h"
 #include "InterfaceScope.h"
 
 #include <llvm/Demangle/ItaniumDemangle.h>
@@ -395,8 +395,6 @@ main(int argc, char **argv) {
             return module;
         });
 
-    Namespace global_namespace;
-
     auto interface_scope = std::make_unique<InterfaceScope>(output_filename, *llvm_context);
 
     // Discover interfaces:
@@ -494,7 +492,7 @@ main(int argc, char **argv) {
 
     std::for_each(
         interface_specs.begin(), interface_specs.end(),
-        [&llair_context, &global_namespace, &interface_scope](const auto& tmp) -> void {
+        [&llair_context, &interface_scope](const auto& tmp) -> void {
             auto [ key, interface_spec ] = tmp;
 
             std::vector<llvm::StringRef> names, qualifiedNames;
@@ -535,16 +533,18 @@ main(int argc, char **argv) {
         llvm::StructType *type = nullptr;
 
         std::vector<Class::Method> methods;
+
+        Module *module = nullptr;
     };
 
     std::for_each(
         input_modules.begin(), input_modules.end(),
-        [&global_namespace, &interface_scope, &klasses](auto &input_module) -> void {
+        [&interface_scope, &klasses](auto &input_module) -> void {
             std::unordered_map<std::string, ClassSpec> class_specs;
 
             std::for_each(
                 input_module->getLLModule()->begin(), input_module->getLLModule()->end(),
-                [&class_specs](auto& function) -> void {
+                [&input_module, &class_specs](auto& function) -> void {
                     if (!function.isStrongDefinitionForLinker()) {
                         return;
                     }
@@ -568,6 +568,7 @@ main(int argc, char **argv) {
 
                         it->second.path = std::get<0>(*names);
                         it->second.type = *type;
+                        it->second.module = input_module.get();
                     }
 
                     it->second.methods.push_back({ method_name.str(), &function });
@@ -575,20 +576,13 @@ main(int argc, char **argv) {
 
             std::for_each(
                 class_specs.begin(), class_specs.end(),
-                [&global_namespace, &interface_scope, &klasses](const auto& tmp) -> void {
+                [&interface_scope, &klasses](const auto& tmp) -> void {
                     auto [ key, class_spec ] = tmp;
 
-                    std::unique_ptr<Class> klass(Class::create(class_spec.type, class_spec.methods));
+                    auto klass = Class::create(class_spec.type, class_spec.methods, class_spec.module);
                     klass->print(llvm::errs());
 
-                    auto result = global_namespace.insert(class_spec.path.begin(), class_spec.path.end(), std::move(klass));
-                    if (!result) {
-                        return;
-                    }
-
-                    interface_scope->insertClass(*result);
-
-                    klasses.push_back(*result);
+                    interface_scope->insertClass(klass);
                 });
         });
 

@@ -1,9 +1,10 @@
 //-*-C++-*-
-#ifndef LLAIR_CLASS_H
-#define LLAIR_CLASS_H
+#ifndef LLAIR_IR_CLASS
+#define LLAIR_IR_CLASS
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/ilist_node.h>
 
 #include <string>
 
@@ -11,18 +12,21 @@ namespace llvm {
 class Function;
 class StructType;
 class raw_ostream;
+template <typename ValueSubClass> class SymbolTableListTraits;
 } // End namespace llvm
 
 namespace llair {
 
-class Class {
+class Module;
+
+class Class : public llvm::ilist_node<Class> {
 public:
     struct Method {
         std::string      name;
         llvm::Function  *function = nullptr;
     };
 
-    static Class *create(llvm::StructType *, llvm::ArrayRef<Method>);
+    static Class *create(llvm::StructType *, llvm::ArrayRef<Method>, Module * = nullptr);
 
     ~Class();
 
@@ -45,12 +49,18 @@ public:
 
 private:
 
-    Class(llvm::StructType *, llvm::ArrayRef<Method>);
+    Class(llvm::StructType *, llvm::ArrayRef<Method>, Module *);
+
+    void setModule(Module *);
 
     llvm::StructType *d_type = nullptr;
 
     std::size_t d_method_count = 0;
-    Method *    d_methods      = nullptr;
+    Method     *d_methods      = nullptr;
+
+    Module *d_module = nullptr;
+
+    friend class llvm::SymbolTableListTraits<Class>;
 };
 
 } // End namespace llair

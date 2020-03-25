@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 
+#include <llair/IR/Class.h>
 #include <llair/IR/EntryPoint.h>
 #include <llair/IR/Module.h>
 
@@ -94,6 +95,7 @@ Module::Module(std::unique_ptr<llvm::Module> &&module)
 }
 
 Module::~Module() {
+    d_classes.clear();
     d_entry_points.clear();
     LLAIRContextImpl::Get(d_context).modules().erase(d_llmodule.get());
 }
