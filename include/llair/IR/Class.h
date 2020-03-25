@@ -21,12 +21,23 @@ class Module;
 
 class Class : public llvm::ilist_node<Class> {
 public:
-    struct Method {
-        std::string      name;
-        llvm::Function  *function = nullptr;
+    class Method {
+    public:
+
+        llvm::StringRef getName()     const { return d_name;     }
+        llvm::Function *getFunction() const { return d_function; }
+
+    private:
+
+        Method(llvm::StringRef, llvm::Function *);
+
+        std::string      d_name;
+        llvm::Function  *d_function = nullptr;
+
+        friend class Class;
     };
 
-    static Class *create(llvm::StructType *, llvm::ArrayRef<Method>, Module * = nullptr);
+    static Class *create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, Module * = nullptr);
 
     ~Class();
 
@@ -49,7 +60,7 @@ public:
 
 private:
 
-    Class(llvm::StructType *, llvm::ArrayRef<Method>, Module *);
+    Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, Module *);
 
     void setModule(Module *);
 

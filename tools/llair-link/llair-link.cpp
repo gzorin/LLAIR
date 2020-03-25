@@ -532,7 +532,12 @@ main(int argc, char **argv) {
         std::vector<llvm::StringRef> path;
         llvm::StructType *type = nullptr;
 
-        std::vector<Class::Method> methods;
+        struct Method {
+            std::string name;
+            llvm::Function *function = nullptr;
+        };
+
+        std::vector<Method> methods;
 
         Module *module = nullptr;
     };
@@ -579,7 +584,24 @@ main(int argc, char **argv) {
                 [&interface_scope, &klasses](const auto& tmp) -> void {
                     auto [ key, class_spec ] = tmp;
 
-                    auto klass = Class::create(class_spec.type, class_spec.methods, class_spec.module);
+                    std::vector<llvm::StringRef> names;
+                    std::vector<llvm::Function *> functions;
+                    names.reserve(class_spec.methods.size());
+                    functions.reserve(class_spec.methods.size());
+
+                    std::accumulate(
+                        class_spec.methods.begin(), class_spec.methods.end(),
+                        std::make_tuple(std::back_inserter(names), std::back_inserter(functions)),
+                        [](auto it, const auto& method) -> auto {
+                            auto [ it_name, it_type ] = it;
+
+                            *it_name++ = method.name;
+                            *it_type++ = method.function;
+
+                            return make_tuple(it_name, it_type);
+                        });
+
+                    auto klass = Class::create(class_spec.type, names, functions);
                     klass->print(llvm::errs());
 
                     interface_scope->insertClass(klass);

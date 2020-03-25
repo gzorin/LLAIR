@@ -38,7 +38,7 @@ InterfaceScope::insertInterface(Interface *interface) {
             auto implemented_method_count = std::count_if(
                 klass->method_begin(), klass->method_end(),
                 [interface](const auto& method) -> bool {
-                    return interface->findMethod(method.name) != nullptr;
+                    return interface->findMethod(method.getName()) != nullptr;
                 });
 
             if (implemented_method_count != interface->method_size()) {
@@ -76,8 +76,8 @@ InterfaceScope::insertClass(const Class *klass) {
         std::back_inserter(method_functions),
         [this](const auto& method) -> llvm::Function * {
             return llvm::Function::Create(
-                method.function->getFunctionType(), llvm::GlobalValue::ExternalLinkage,
-                method.function->getName(), d_module.get());
+                method.getFunction()->getFunctionType(), llvm::GlobalValue::ExternalLinkage,
+                method.getFunction()->getName(), d_module.get());
         });
 
     auto it_klass = d_klasses.insert({ klass, { (uint32_t)d_klasses.size(), type, method_functions } }).first;
@@ -88,7 +88,7 @@ InterfaceScope::insertClass(const Class *klass) {
     std::for_each(
         it_klass->first->method_begin(), it_klass->first->method_end(),
         [this, it_klass, &implemented_method_count](const auto& method) {
-            auto it = d_interface_index.equal_range(method.name);
+            auto it = d_interface_index.equal_range(method.getName());
 
             std::for_each(
                 it.first, it.second,
@@ -117,7 +117,7 @@ InterfaceScope::insertClass(const Class *klass) {
         klass->method_begin(), klass->method_end(),
         std::inserter(d_klass_index, d_klass_index.end()),
         [klass](const auto& method) -> std::pair<llvm::StringRef, const Class *> {
-            return { method.name, klass };
+            return { method.getName(), klass };
         });
 }
 
@@ -187,11 +187,11 @@ InterfaceScope::Implementations::addImplementation(const Class *klass, uint32_t 
     auto it_method_function = method_functions.begin();
 
     while (it_interface_method != d_interface->method_end() && it_klass_method != klass->method_end()) {
-        if (it_interface_method->getName() < it_klass_method->name) {
+        if (it_interface_method->getName() < it_klass_method->getName()) {
             ++it_interface_method;
             ++it_method;
         } else  {
-            if (!(it_klass_method->name < it_interface_method->getName())) {
+            if (!(it_klass_method->getName() < it_interface_method->getName())) {
                 auto builder = std::make_unique<llvm::IRBuilder<>>(context);
 
                 if (it_method->switcher->getNumCases() == 0) {
@@ -214,7 +214,7 @@ InterfaceScope::Implementations::addImplementation(const Class *klass, uint32_t 
                         llvm::PointerType::get(type, 1)), 1);
 
                 std::vector<llvm::Value *> args;
-                args.reserve(it_klass_method->function->arg_size());
+                args.reserve(it_klass_method->getFunction()->arg_size());
 
                 auto it_args = std::back_inserter(args);
 

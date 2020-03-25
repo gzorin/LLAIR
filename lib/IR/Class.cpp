@@ -26,9 +26,9 @@ SymbolTableListTraits<llair::Class>::removeNodeFromList(llair::Class *klass) {
 
 namespace llair {
 
-Class::Class(llvm::StructType *type, llvm::ArrayRef<Method> methods, Module *module)
+Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, Module *module)
     : d_type(type)
-    , d_method_count(methods.size())
+    , d_method_count(std::min(names.size(), functions.size()))
     , d_module(module) {
     if (d_module) {
         module->getClassList().push_back(this);
@@ -36,14 +36,16 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<Method> methods, Module *mod
 
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
-    std::accumulate(methods.begin(), methods.end(),
-                    d_methods, [](auto plhs, const auto &rhs) -> auto {
-                        new (plhs++) Method(rhs);
-                        return plhs;
-                    });
+    auto p_method = d_methods;
+    auto it_name = names.begin();
+    auto it_function = functions.begin();
+
+    for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_name, ++it_function) {
+        new (p_method) Method(*it_name, *it_function);
+    }
 
     std::sort(d_methods, d_methods + d_method_count, [](const auto &lhs, const auto &rhs) -> auto {
-        return lhs.name < rhs.name;
+        return lhs.getName() < rhs.getName();
     });
 }
 
@@ -61,8 +63,8 @@ Class::setModule(Module *module) {
 }
 
 Class *
-Class::create(llvm::StructType *type, llvm::ArrayRef<Method> methods, Module *module) {
-    auto interface = new Class(type, methods, module);
+Class::create(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, Module *module) {
+    auto interface = new Class(type, names, functions, module);
     return interface;
 }
 
@@ -70,11 +72,11 @@ const Class::Method *
 Class::findMethod(llvm::StringRef name) const {
     struct Compare {
         bool operator()(llvm::StringRef lhs, const Method &rhs) const {
-            return lhs.compare(rhs.name) < 0;
+            return lhs.compare(rhs.getName()) < 0;
         }
 
         bool operator()(const Method &lhs, llvm::StringRef rhs) const {
-            return rhs.compare(lhs.name) >= 0;
+            return rhs.compare(lhs.getName()) >= 0;
         }
     };
 
@@ -96,11 +98,16 @@ Class::print(llvm::raw_ostream& os) const {
     std::for_each(
         d_methods, d_methods + d_method_count,
         [&os](const auto& method) -> void {
-            os.indent(4) << method.name << ": ";
-            method.function->printAsOperand(os);
+            os.indent(4) << method.getName() << ": ";
+            method.getFunction()->printAsOperand(os);
             os << "\n";
         });
     os << "}" << "\n";
+}
+
+Class::Method::Method(llvm::StringRef name, llvm::Function *function)
+: d_name(name)
+, d_function(function) {
 }
 
 } // End namespace llair
