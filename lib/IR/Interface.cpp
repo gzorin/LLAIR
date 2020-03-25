@@ -1,15 +1,17 @@
-#include "Interface.h"
-#include "InterfaceScope.h"
+#include <llair/IR/Interface.h>
 
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <numeric>
 
+#include "LLAIRContextImpl.h"
+
 namespace llair {
 
-Interface::Interface(InterfaceScope& scope, llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::StringRef> qualifiedNames, llvm::ArrayRef<llvm::FunctionType *> types)
-    : d_scope(scope)
+Interface::Interface(LLAIRContext& context, llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::StringRef> qualifiedNames, llvm::ArrayRef<llvm::FunctionType *> types)
+    : d_context(context)
     , d_type(type)
     , d_method_count(std::min(std::min(names.size(), qualifiedNames.size()), types.size())) {
     d_methods = std::allocator<Method>().allocate(d_method_count);
@@ -23,9 +25,11 @@ Interface::Interface(InterfaceScope& scope, llvm::StructType *type, llvm::ArrayR
         new (p_method) Method(*it_name, *it_qualifiedName, *it_type);
     }
 
-    std::sort(d_methods, d_methods + d_method_count, [](const auto &lhs, const auto &rhs) -> auto {
-        return lhs.getName() < rhs.getName();
-    });
+    std::sort(
+        d_methods, d_methods + d_method_count,
+        [](const auto &lhs, const auto &rhs) -> auto {
+            return lhs.getName() < rhs.getName();
+        });
 }
 
 Interface::~Interface() {
@@ -37,16 +41,18 @@ Interface::~Interface() {
 }
 
 Interface *
-Interface::get(InterfaceScope& scope, llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::StringRef> qualifiedNames, llvm::ArrayRef<llvm::FunctionType *> types) {
-    auto it = scope.d_interfaces_.find_as(
-        InterfaceScope::InterfaceKeyInfo::KeyTy(type, names, qualifiedNames, types));
+Interface::get(LLAIRContext& context, llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::StringRef> qualifiedNames, llvm::ArrayRef<llvm::FunctionType *> types) {
+    auto& context_impl = LLAIRContextImpl::Get(context);
 
-    if (it != scope.d_interfaces_.end()) {
+    auto it = context_impl.interfaces().find_as(
+        InterfaceKeyInfo::KeyTy(type, names, qualifiedNames, types));
+
+    if (it != context_impl.interfaces().end()) {
         return *it;
     }
 
-    auto interface = new Interface(scope, type, names, qualifiedNames, types);
-    scope.insertInterface(interface);
+    auto interface = new Interface(context, type, names, qualifiedNames, types);
+    context_impl.interfaces().insert(interface);
     return interface;
 }
 
@@ -85,6 +91,11 @@ Interface::print(llvm::raw_ostream& os) const {
             os << "\n";
         });
     os << "}" << "\n";
+}
+
+void
+Interface::dump() const {
+    print(llvm::dbgs());
 }
 
 Interface::Method::Method(llvm::StringRef name, llvm::StringRef qualifiedName, llvm::FunctionType *type)

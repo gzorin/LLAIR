@@ -2,7 +2,7 @@
 #ifndef LLAIR_INTERFACESCOPE_H
 #define LLAIR_INTERFACESCOPE_H
 
-#include "Interface.h"
+#include <llair/IR/Interface.h>
 
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Hashing.h>

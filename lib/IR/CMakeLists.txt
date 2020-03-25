@@ -2,6 +2,7 @@ add_definitions(${LLVM_DEFINITIONS})
 
 add_library(LLAIR STATIC
   EntryPoint.cpp
+  Interface.cpp
   LLAIRContext.cpp
   Module.cpp)
 

@@ -1,5 +1,4 @@
 #include "Class.h"
-#include "Interface.h"
 #include "InterfaceScope.h"
 
 #include <llvm/IR/DerivedTypes.h>

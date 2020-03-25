@@ -1,10 +1,10 @@
 #include <llair/Bitcode/Bitcode.h>
+#include <llair/IR/Interface.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
 
 #include "Class.h"
-#include "Interface.h"
 #include "InterfaceScope.h"
 
 #include <llvm/Demangle/ItaniumDemangle.h>
@@ -494,7 +494,7 @@ main(int argc, char **argv) {
 
     std::for_each(
         interface_specs.begin(), interface_specs.end(),
-        [&global_namespace, &interface_scope](const auto& tmp) -> void {
+        [&llair_context, &global_namespace, &interface_scope](const auto& tmp) -> void {
             auto [ key, interface_spec ] = tmp;
 
             std::vector<llvm::StringRef> names, qualifiedNames;
@@ -516,7 +516,7 @@ main(int argc, char **argv) {
                     return make_tuple(it_name, it_qualifiedName, it_type);
                 });
 
-            auto interface = Interface::get(*interface_scope, interface_spec.type, names, qualifiedNames, types);
+            auto interface = Interface::get(*llair_context, interface_spec.type, names, qualifiedNames, types);
             interface->print(llvm::errs());
         });
 

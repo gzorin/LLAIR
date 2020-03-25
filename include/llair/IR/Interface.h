@@ -2,6 +2,8 @@
 #ifndef LLAIR_INTERFACE
 #define LLAIR_INTERFACE
 
+#include <llair/IR/LLAIRContext.h>
+
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
@@ -16,7 +18,7 @@ class raw_ostream;
 
 namespace llair {
 
-class InterfaceScope;
+class LLAIRContext;
 
 class Interface {
 public:
@@ -39,9 +41,11 @@ public:
         friend class Interface;
     };
 
-    static Interface *get(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
+    static Interface *get(LLAIRContext&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
 
     ~Interface();
+
+    LLAIRContext& getContext() const { return d_context; }
 
     llvm::StructType *getType() const { return d_type; }
 
@@ -60,11 +64,13 @@ public:
 
     void print(llvm::raw_ostream&) const;
 
+    void dump() const;
+
 private:
 
-    Interface(InterfaceScope&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
+    Interface(LLAIRContext&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
 
-    InterfaceScope& d_scope;
+    LLAIRContext& d_context;
 
     llvm::StructType *d_type = nullptr;
 
