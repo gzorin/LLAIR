@@ -73,7 +73,7 @@ getBaseName(const llvm::itanium_demangle::Node *node) {
     return std::string(base_name.begin(), base_name.end());
 }
 
-std::optional<std::tuple<std::vector<llvm::StringRef>, llvm::StringRef>>
+std::optional<std::tuple<llvm::StringRef, std::vector<llvm::StringRef>, llvm::StringRef>>
 parseClassPathAndMethodName(const llvm::Function *function) {
     using namespace llvm::itanium_demangle;
 
@@ -128,6 +128,10 @@ parseClassPathAndMethodName(const llvm::Function *function) {
         ++path_length;
     }
 
+    llvm::StringRef qualified_name(
+        path_parts.front().begin(),
+        std::distance(path_parts.front().begin(), path_parts.back().end()));
+
     std::vector<llvm::StringRef> path;
     path.reserve(path_length);
     std::copy(path_parts.begin(), path_parts.end(),
@@ -138,7 +142,7 @@ parseClassPathAndMethodName(const llvm::Function *function) {
         nested_name->Name->getBaseName().begin(),
         std::distance(nested_name->Name->getBaseName().begin(), name.end()));
 
-    return std::make_tuple(path, method_name);
+    return std::make_tuple(qualified_name, path, method_name);
 }
 
 std::optional<llvm::StructType *>
@@ -476,14 +480,14 @@ main(int argc, char **argv) {
                 return;
             }
 
-            auto class_name  = canonicalizeClassPath(std::get<0>(*names));
-            auto method_name = std::get<1>(*names);
+            auto class_name  = canonicalizeClassPath(std::get<1>(*names));
+            auto method_name = std::get<2>(*names);
 
             auto it = interface_specs.find(class_name);
             if (it == interface_specs.end()) {
                 it = interface_specs.insert({ class_name, {} }).first;
 
-                it->second.path = std::get<0>(*names);
+                it->second.path = std::get<1>(*names);
                 it->second.type = *type;
             }
 
@@ -529,6 +533,7 @@ main(int argc, char **argv) {
     std::vector<const Class *> klasses;
 
     struct ClassSpec {
+        llvm::StringRef name;
         std::vector<llvm::StringRef> path;
         llvm::StructType *type = nullptr;
 
@@ -564,14 +569,15 @@ main(int argc, char **argv) {
                         return;
                     }
 
-                    auto class_name  = canonicalizeClassPath(std::get<0>(*names));
-                    auto method_name = std::get<1>(*names);
+                    auto class_name  = canonicalizeClassPath(std::get<1>(*names));
+                    auto method_name = std::get<2>(*names);
 
                     auto it = class_specs.find(class_name);
                     if (it == class_specs.end()) {
                         it = class_specs.insert({ class_name, {} }).first;
 
-                        it->second.path = std::get<0>(*names);
+                        it->second.name = std::get<0>(*names);
+                        it->second.path = std::get<1>(*names);
                         it->second.type = *type;
                         it->second.module = input_module.get();
                     }
@@ -601,7 +607,7 @@ main(int argc, char **argv) {
                             return make_tuple(it_name, it_type);
                         });
 
-                    auto klass = Class::create(class_spec.type, names, functions);
+                    auto klass = Class::create(class_spec.type, names, functions, class_spec.name, class_spec.module);
                     klass->print(llvm::errs());
 
                     interface_scope->insertClass(klass);

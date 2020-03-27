@@ -5,7 +5,9 @@ add_library(LLAIR STATIC
   EntryPoint.cpp
   Interface.cpp
   LLAIRContext.cpp
-  Module.cpp)
+  Module.cpp
+  Named.cpp
+  SymbolTable.cpp)
 
 target_include_directories(LLAIR
   PUBLIC  ${LLVM_INCLUDE_DIRS}

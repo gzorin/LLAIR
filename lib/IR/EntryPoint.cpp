@@ -94,6 +94,10 @@ EntryPoint::EntryPoint(EntryPoint::EntryPointKind kind, llvm::Function *function
     , d_module(module) {
     d_function_md.reset(llvm::ValueAsMetadata::get(function));
 
+    if (module) {
+        module->getEntryPointList().push_back(this);
+    }
+
     d_argument_count = function->arg_size();
 
     d_arguments = std::allocator<Argument>().allocate(d_argument_count);
@@ -119,11 +123,10 @@ EntryPoint::EntryPoint(EntryPoint::EntryPointKind kind, llvm::Function *function
 
 EntryPoint::EntryPoint(EntryPoint::EntryPointKind kind, llvm::MDNode *md, Module *module)
     : d_kind(kind)
-    , d_arguments(nullptr)
-    , d_module(module) {
+    , d_arguments(nullptr) {
     d_function_md.reset(llvm::cast<llvm::ValueAsMetadata>(md->getOperand(0).get()));
 
-    if (d_module) {
+    if (module) {
         module->getEntryPointList().push_back(this);
     }
 

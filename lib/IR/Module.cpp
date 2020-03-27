@@ -13,8 +13,6 @@
 #include "LLAIRContextImpl.h"
 #include "Metadata.h"
 
-template class llvm::SymbolTableListTraits<llair::EntryPoint>;
-
 namespace llair {
 
 namespace {
@@ -184,6 +182,16 @@ Module::getEntryPoint(llvm::StringRef name) const {
     }
 
     return EntryPoint::Get(function);
+}
+
+Class *
+Module::getClass(llvm::StringRef name) const {
+    auto named = d_class_symbol_table.lookup(name);
+    if (!named) {
+        return nullptr;
+    }
+
+    return static_cast<Class *>(named);
 }
 
 namespace {

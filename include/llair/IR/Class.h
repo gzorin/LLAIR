@@ -2,6 +2,8 @@
 #ifndef LLAIR_IR_CLASS
 #define LLAIR_IR_CLASS
 
+#include <llair/IR/Named.h>
+
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/ilist_node.h>
@@ -19,7 +21,8 @@ namespace llair {
 
 class Module;
 
-class Class : public llvm::ilist_node<Class> {
+class Class : public llvm::ilist_node<Class>,
+              public Named {
 public:
     class Method {
     public:
@@ -37,7 +40,7 @@ public:
         friend class Class;
     };
 
-    static Class *create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, Module * = nullptr);
+    static Class *create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef = "", Module * = nullptr);
 
     ~Class();
 
@@ -58,11 +61,16 @@ public:
 
     void print(llvm::raw_ostream&) const;
 
+    void dump() const override;
+
 private:
 
-    Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, Module *);
+    Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef, Module *);
 
     void setModule(Module *);
+
+    // Named overrides:
+    LLAIRContext& getContext() const override;
 
     llvm::StructType *d_type = nullptr;
 

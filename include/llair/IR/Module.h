@@ -3,6 +3,7 @@
 #define LLAIR_IR_MODULE_H
 
 #include <llair/IR/LLAIRContext.h>
+#include <llair/IR/SymbolTable.h>
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
@@ -52,11 +53,6 @@ public:
     llvm::Module *                getLLModule() { return d_llmodule.get(); }
     std::unique_ptr<llvm::Module> releaseLLModule();
 
-    const llvm::ValueSymbolTable &getValueSymbolTable() const {
-        return d_llmodule->getValueSymbolTable();
-    }
-    llvm::ValueSymbolTable &getValueSymbolTable() { return d_llmodule->getValueSymbolTable(); }
-
     //
     struct Version {
         int major = 0, minor = 0, patch = 0;
@@ -92,17 +88,25 @@ public:
         return &Module::d_classes;
     }
 
+    const SymbolTable &getClassSymbolTable() const { return d_class_symbol_table; }
+    SymbolTable &getClassSymbolTable() { return d_class_symbol_table; }
+
+    Class *getClass(llvm::StringRef) const;
+
     //
     void syncMetadata();
 
 private:
+
     LLAIRContext &                d_context;
     std::unique_ptr<llvm::Module> d_llmodule;
 
     llvm::TypedTrackingMDRef<llvm::MDTuple> d_version_md, d_language_md;
 
     EntryPointListType d_entry_points;
+
     ClassListType d_classes;
+    SymbolTable d_class_symbol_table;
 };
 
 } // namespace llair

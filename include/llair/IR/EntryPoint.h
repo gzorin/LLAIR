@@ -204,7 +204,7 @@ protected:
     std::size_t d_argument_count = 0;
     Argument *  d_arguments;
 
-    Module *d_module;
+    Module *d_module = nullptr;
 
     llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
     llvm::TypedTrackingMDRef<llvm::ValueAsMetadata> d_function_md;

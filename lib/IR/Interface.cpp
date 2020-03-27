@@ -79,9 +79,9 @@ Interface::findMethod(llvm::StringRef name) const {
 
 void
 Interface::print(llvm::raw_ostream& os) const {
-    os << "interface ";
+    os << "interface (";
     d_type->print(os, false, true);
-    os << " {" << "\n";
+    os << ") {" << "\n";
 
     std::for_each(
         d_methods, d_methods + d_method_count,

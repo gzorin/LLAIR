@@ -2,13 +2,15 @@
 #ifndef LLAIRCONTEXTIMPL_H
 #define LLAIRCONTEXTIMPL_H
 
+#include <llair/IR/Interface.h>
+#include <llair/IR/LLAIRContext.h>
+#include <llair/IR/Module.h>
+#include <llair/IR/Named.h>
+
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
-#include <llair/IR/Interface.h>
-#include <llair/IR/LLAIRContext.h>
-#include <llair/IR/Module.h>
 
 #include <numeric>
 
@@ -148,6 +150,12 @@ public:
     llvm::LLVMContext&       getLLContext()       { return d_llcontext; }
 
     //
+    using NameMap = llvm::DenseMap<const Named *, SymbolTableEntry *>;
+
+    NameMap&                 names()       { return d_names; }
+    const NameMap&           names() const { return d_names; }
+
+    //
     using ModuleMapType = llvm::DenseMap<llvm::Module *, Module *>;
 
     ModuleMapType&           modules()       { return d_modules; }
@@ -168,6 +176,7 @@ public:
 private:
     llvm::LLVMContext& d_llcontext;
 
+    NameMap            d_names;
     ModuleMapType      d_modules;
     EntryPointMapType  d_entry_points;
     InterfaceSetType   d_interfaces;
