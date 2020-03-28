@@ -20,6 +20,7 @@ class ValueSymbolTable;
 
 namespace llair {
 class Class;
+class Dispatcher;
 class EntryPoint;
 class Module;
 } // End namespace llair
@@ -27,6 +28,7 @@ class Module;
 namespace llvm {
 template <> struct SymbolTableListParentType<llair::Class>      { using type = llair::Module; };
 template <> struct SymbolTableListParentType<llair::EntryPoint> { using type = llair::Module; };
+template <> struct SymbolTableListParentType<llair::Dispatcher> { using type = llair::Module; };
 } // End namespace llvm
 
 namespace llair {
@@ -35,6 +37,7 @@ class Module {
 public:
     using EntryPointListType = llvm::SymbolTableList<EntryPoint>;
     using ClassListType = llvm::SymbolTableList<Class>;
+    using DispatcherListType = llvm::SymbolTableList<Dispatcher>;
 
     static const Module *Get(const llvm::Module *);
     static Module *      Get(llvm::Module *);
@@ -94,6 +97,14 @@ public:
     Class *getClass(llvm::StringRef) const;
 
     //
+    const DispatcherListType& getDispatcherList() const { return d_dispatchers; }
+    DispatcherListType&       getDispatcherList()       { return d_dispatchers; }
+
+    static DispatcherListType Module::*getSublistAccess(Dispatcher *) {
+        return &Module::d_dispatchers;
+    }
+
+    //
     void syncMetadata();
 
 private:
@@ -107,6 +118,8 @@ private:
 
     ClassListType d_classes;
     SymbolTable d_class_symbol_table;
+
+    DispatcherListType d_dispatchers;
 };
 
 } // namespace llair

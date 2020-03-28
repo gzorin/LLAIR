@@ -1,5 +1,6 @@
 #include <llair/Bitcode/Bitcode.h>
 #include <llair/IR/Class.h>
+#include <llair/IR/Dispatcher.h>
 #include <llair/IR/Interface.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
@@ -399,7 +400,7 @@ main(int argc, char **argv) {
             return module;
         });
 
-    auto interface_scope = std::make_unique<InterfaceScope>(output_filename, *llvm_context);
+    auto interface_scope = std::make_unique<InterfaceScope>(output_filename, *llair_context);
 
     // Discover interfaces:
     // - with list of modules, and optional list of interface names
@@ -520,6 +521,8 @@ main(int argc, char **argv) {
 
             auto interface = Interface::get(*llair_context, interface_spec.type, names, qualifiedNames, types);
             interface->print(llvm::errs());
+
+            interface_scope->insertInterface(interface);
         });
 
     //
@@ -614,6 +617,12 @@ main(int argc, char **argv) {
                 });
         });
 
+    std::for_each(
+        interface_scope->module()->getDispatcherList().begin(), interface_scope->module()->getDispatcherList().end(),
+        [](const auto& dispatcher) -> void {
+            dispatcher.dump();
+        });
+
     // Write it out:
     std::error_code                       error_code;
     std::unique_ptr<llvm::ToolOutputFile> output_file(
@@ -624,7 +633,7 @@ main(int argc, char **argv) {
         return 1;
     }
 
-    llvm::WriteBitcodeToFile(interface_scope->module(), output_file->os());
+    llvm::WriteBitcodeToFile(interface_scope->module()->getLLModule(), output_file->os());
     output_file->keep();
 
     return 0;

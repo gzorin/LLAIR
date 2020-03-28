@@ -1,4 +1,5 @@
 #include <llair/IR/Class.h>
+#include <llair/IR/Interface.h>
 #include <llair/IR/Module.h>
 
 #include <llvm/IR/DerivedTypes.h>
@@ -102,6 +103,29 @@ Class::findMethod(llvm::StringRef name) const {
     }
 
     return tmp.first;
+}
+
+bool
+Class::doesImplement(const Interface *interface) const {
+    auto it_interface_method = interface->method_begin();
+    auto it_klass_method = method_begin();
+    std::size_t count = 0;
+
+    while (it_interface_method != interface->method_end() && it_klass_method != method_end()) {
+        if (it_interface_method->getName() < it_klass_method->getName()) {
+            ++it_interface_method;
+        } else  {
+            if (!(it_klass_method->getName() < it_interface_method->getName())) {
+                assert(it_klass_method->getName() == it_interface_method->getName());
+
+                ++it_interface_method;
+                ++count;
+            }
+            ++it_klass_method;
+        }
+    }
+
+    return count == interface->method_size();
 }
 
 void

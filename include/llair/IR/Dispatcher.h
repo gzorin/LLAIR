@@ -1,10 +1,11 @@
 //-*-C++-*-
-#ifndef LLAIR_IR_CLASS
-#define LLAIR_IR_CLASS
+#ifndef LLAIR_IR_DISPATCHER_H
+#define LLAIR_IR_DISPATCHER_H
 
-#include <llair/IR/Named.h>
+#include <llair/IR/Interface.h>
 
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/ilist_node.h>
 
@@ -13,39 +14,40 @@
 namespace llvm {
 class Function;
 class StructType;
+class SwitchInst;
 class raw_ostream;
 template <typename ValueSubClass> class SymbolTableListTraits;
 } // End namespace llvm
 
 namespace llair {
 
-class Interface;
+class Class;
 class Module;
 
-class Class : public llvm::ilist_node<Class>,
-              public Named {
+class Dispatcher : public llvm::ilist_node<Dispatcher> {
 public:
     class Method {
     public:
 
-        llvm::StringRef getName()     const { return d_name;     }
+        llvm::StringRef getName()     const { return d_interface_method->getName();     }
         llvm::Function *getFunction() const { return d_function; }
 
     private:
 
-        Method(llvm::StringRef, llvm::Function *);
+        Method(const Interface *, const Interface::Method *, Module *);
 
-        std::string      d_name;
-        llvm::Function  *d_function = nullptr;
+        const Interface::Method *d_interface_method = nullptr;
+        llvm::Function          *d_function = nullptr;
+        llvm::SwitchInst        *d_switcher = nullptr;
 
-        friend class Class;
+        friend class Dispatcher;
     };
 
-    static Class *create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef = "", Module * = nullptr);
+    static Dispatcher *create(const Interface *, Module * = nullptr);
 
-    ~Class();
+    ~Dispatcher();
 
-    llvm::StructType *getType() const { return d_type; }
+    const Interface *getInterface() const { return d_interface; }
 
     using method_iterator       = Method *;
     using const_method_iterator = const Method *;
@@ -60,29 +62,33 @@ public:
 
     const Method *findMethod(llvm::StringRef) const;
 
-    bool doesImplement(const Interface *) const;
+    void insertImplementation(uint32_t, const Class *);
+    void removeImplementation(uint32_t);
 
     void print(llvm::raw_ostream&) const;
 
-    void dump() const override;
+    void dump() const;
 
 private:
 
-    Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef, Module *);
+    Dispatcher(const Interface *, Module *);
 
     void setModule(Module *);
 
-    // Named overrides:
-    LLAIRContext& getContext() const override;
-
-    llvm::StructType *d_type = nullptr;
+    const Interface *d_interface = nullptr;
 
     std::size_t d_method_count = 0;
     Method     *d_methods      = nullptr;
 
     Module *d_module = nullptr;
 
-    friend class llvm::SymbolTableListTraits<Class>;
+    struct Implementation {
+        std::string name;
+    };
+
+    llvm::DenseMap<uint32_t, Implementation> d_implementations;
+
+    friend class llvm::SymbolTableListTraits<Dispatcher>;
 };
 
 } // End namespace llair
