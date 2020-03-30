@@ -16,7 +16,6 @@ class Function;
 class StructType;
 class SwitchInst;
 class raw_ostream;
-template <typename ValueSubClass> class SymbolTableListTraits;
 } // End namespace llvm
 
 namespace llair {
@@ -24,10 +23,14 @@ namespace llair {
 class Class;
 class Module;
 
+template<typename T> struct module_ilist_traits;
+
 class Dispatcher : public llvm::ilist_node<Dispatcher> {
 public:
     class Method {
     public:
+
+        ~Method();
 
         llvm::StringRef getName()     const { return d_interface_method->getName();     }
         llvm::Function *getFunction() const { return d_function; }
@@ -88,7 +91,7 @@ private:
 
     llvm::DenseMap<uint32_t, Implementation> d_implementations;
 
-    friend class llvm::SymbolTableListTraits<Dispatcher>;
+    friend struct module_ilist_traits<Dispatcher>;
 };
 
 } // End namespace llair

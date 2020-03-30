@@ -9,33 +9,24 @@
 
 #include <numeric>
 
-namespace llvm {
+namespace llair {
 
-template <>
+template<>
 void
-SymbolTableListTraits<llair::Class>::addNodeToList(llair::Class *klass) {
-    auto owner = getListOwner();
-    klass->setModule(owner);
+module_ilist_traits<llair::Class>::addNodeToList(llair::Class *klass) {
+    auto module = getModule();
+    klass->setModule(module);
 }
 
-template <>
+template<>
 void
-SymbolTableListTraits<llair::Class>::removeNodeFromList(llair::Class *klass) {
+module_ilist_traits<llair::Class>::removeNodeFromList(llair::Class *klass) {
     klass->setModule(nullptr);
 }
-
-} // namespace llvm
-
-namespace llair {
 
 Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, llvm::StringRef name, Module *module)
     : d_type(type)
     , d_method_count(std::min(names.size(), functions.size())) {
-    if (module) {
-        module->getClassList().push_back(this);
-    }
-    assert(d_module == module);
-
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
     auto p_method = d_methods;
@@ -51,6 +42,11 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     });
 
     setName(name);
+
+    if (module) {
+        module->getClassList().push_back(this);
+    }
+    assert(d_module == module);
 }
 
 Class::~Class() {

@@ -16,12 +16,13 @@ class Argument;
 class Function;
 class MDNode;
 class Metadata;
-template <typename ValueSubClass> class SymbolTableListTraits;
 } // namespace llvm
 
 namespace llair {
 
 class Module;
+
+template<typename T> struct module_ilist_traits;
 
 class EntryPoint : public llvm::ilist_node<EntryPoint> {
 public:
@@ -214,8 +215,7 @@ private:
     void setModule(Module *);
     void updateArgumentMetadata(Argument *);
 
-    friend class llvm::SymbolTableListTraits<EntryPoint>;
-    friend class EntryPoint;
+    friend struct module_ilist_traits<EntryPoint>;
 };
 
 class VertexEntryPoint : public EntryPoint {

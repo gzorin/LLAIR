@@ -10,23 +10,6 @@
 #include <numeric>
 #include <optional>
 
-namespace llvm {
-
-template <>
-void
-SymbolTableListTraits<llair::EntryPoint>::addNodeToList(llair::EntryPoint *entry_point) {
-    auto owner = getListOwner();
-    entry_point->setModule(owner);
-}
-
-template <>
-void
-SymbolTableListTraits<llair::EntryPoint>::removeNodeFromList(llair::EntryPoint *entry_point) {
-    entry_point->setModule(nullptr);
-}
-
-} // namespace llvm
-
 namespace {
 
 template <typename Input1, typename Input2, typename BinaryFunction, typename Compare>
@@ -50,6 +33,19 @@ for_each_intersection(Input1 first1, Input1 last1, Input2 first2, Input2 last2, 
 } // namespace
 
 namespace llair {
+
+template<>
+void
+module_ilist_traits<llair::EntryPoint>::addNodeToList(llair::EntryPoint *entry_point) {
+    auto module = getModule();
+    entry_point->setModule(module);
+}
+
+template<>
+void
+module_ilist_traits<llair::EntryPoint>::removeNodeFromList(llair::EntryPoint *entry_point) {
+    entry_point->setModule(nullptr);
+}
 
 const EntryPoint *
 EntryPoint::Get(const llvm::Function *llfunction) {
@@ -90,8 +86,7 @@ EntryPoint::Get(llvm::Function *llfunction) {
 
 EntryPoint::EntryPoint(EntryPoint::EntryPointKind kind, llvm::Function *function, Module *module)
     : d_kind(kind)
-    , d_arguments(nullptr)
-    , d_module(module) {
+    , d_arguments(nullptr) {
     d_function_md.reset(llvm::ValueAsMetadata::get(function));
 
     if (module) {

@@ -11,41 +11,37 @@
 
 #include <numeric>
 
-namespace llvm {
+namespace llair {
 
-template <>
+template<>
 void
-SymbolTableListTraits<llair::Dispatcher>::addNodeToList(llair::Dispatcher *dispatcher) {
-    auto owner = getListOwner();
-    dispatcher->setModule(owner);
+module_ilist_traits<llair::Dispatcher>::addNodeToList(llair::Dispatcher *dispatcher) {
+    auto module = getModule();
+    dispatcher->setModule(module);
 }
 
-template <>
+template<>
 void
-SymbolTableListTraits<llair::Dispatcher>::removeNodeFromList(llair::Dispatcher *dispatcher) {
+module_ilist_traits<llair::Dispatcher>::removeNodeFromList(llair::Dispatcher *dispatcher) {
     dispatcher->setModule(nullptr);
 }
-
-} // namespace llvm
-
-namespace llair {
 
 Dispatcher::Dispatcher(const Interface *interface, Module *module)
     : d_interface(interface)
     , d_method_count(d_interface->method_size()) {
-    if (module) {
-        module->getDispatcherList().push_back(this);
-    }
-    assert(d_module == module);
-
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
     auto p_method = d_methods;
     auto it_interface_method = d_interface->method_begin();
 
     for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_interface_method) {
-        new (p_method) Method(d_interface, it_interface_method, d_module);
+        new (p_method) Method(d_interface, it_interface_method, nullptr);
     }
+
+    if (module) {
+        module->getDispatcherList().push_back(this);
+    }
+    assert(d_module == module);
 }
 
 Dispatcher::~Dispatcher() {
@@ -62,23 +58,19 @@ Dispatcher::setModule(Module *module) {
         return;
     }
 
-#if 0
     if (d_module) {
         std::for_each(
             d_methods, d_methods + d_method_count,
-            [](auto &method) -> void { method.getFunction()->removeFromParent(); });
+            [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().remove(method.getFunction()); });
     }
-#endif
 
     d_module = module;
 
-#if 0
     if (d_module) {
         std::for_each(
             d_methods, d_methods + d_method_count,
             [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().push_back(method.getFunction()); });
     }
-#endif
 }
 
 Dispatcher *
@@ -240,6 +232,11 @@ Dispatcher::Method::Method(const Interface *interface, const Interface::Method *
 
     d_switcher = builder->CreateSwitch(kind,
         llvm::BasicBlock::Create(ll_context, "", d_function));
+}
+
+Dispatcher::Method::~Method() {
+    assert(d_function->getParent() == nullptr);
+    delete d_function;
 }
 
 } // End namespace llair

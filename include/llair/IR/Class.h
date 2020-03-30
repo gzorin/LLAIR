@@ -14,13 +14,14 @@ namespace llvm {
 class Function;
 class StructType;
 class raw_ostream;
-template <typename ValueSubClass> class SymbolTableListTraits;
 } // End namespace llvm
 
 namespace llair {
 
 class Interface;
 class Module;
+
+template<typename T> struct module_ilist_traits;
 
 class Class : public llvm::ilist_node<Class>,
               public Named {
@@ -82,7 +83,7 @@ private:
 
     Module *d_module = nullptr;
 
-    friend class llvm::SymbolTableListTraits<Class>;
+    friend struct module_ilist_traits<Class>;
 };
 
 } // End namespace llair
