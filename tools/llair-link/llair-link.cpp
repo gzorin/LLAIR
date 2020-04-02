@@ -391,7 +391,8 @@ main(int argc, char **argv) {
     std::vector<std::unique_ptr<llair::Module>> input_modules;
 
     std::transform(
-        input_filenames.begin(), input_filenames.end(), std::back_inserter(input_modules),
+        input_filenames.begin(), input_filenames.end(),
+        std::back_inserter(input_modules),
         [&exit_on_err, &llair_context](auto input_filename) -> std::unique_ptr<llair::Module> {
             auto buffer =
                 exit_on_err(errorOrToExpected(llvm::MemoryBuffer::getFileOrSTDIN(input_filename)));
@@ -400,7 +401,7 @@ main(int argc, char **argv) {
             return module;
         });
 
-    auto interface_scope = std::make_unique<InterfaceScope>(output_filename, *llair_context);
+    auto interface_scope = std::make_unique<InterfaceScope>("dispatchers", *llair_context);
 
     // Discover interfaces:
     // - with list of modules, and optional list of interface names
@@ -415,7 +416,14 @@ main(int argc, char **argv) {
     //    - get the struct type of the first parameter, add it to the set of types that
     //      represent this interface (since named types are not uniqued)
     //    - associate the name of the function with the interface
-    std::vector<llvm::Function *> declared_functions, defined_functions;
+    struct compare_declared_functions {
+        bool operator()(llvm::Function *lhs, llvm::Function *rhs) const {
+            return lhs->getName().compare(rhs->getName()) < 0;
+        }
+    };
+
+    std::set<llvm::Function *, compare_declared_functions> declared_functions;
+    std::vector<llvm::Function *> defined_functions;
 
     std::for_each(
         input_modules.begin(), input_modules.end(),
@@ -424,17 +432,13 @@ main(int argc, char **argv) {
                 input_module->getLLModule()->begin(), input_module->getLLModule()->end(),
                 [&declared_functions, &defined_functions](auto &function) -> void {
                     if (function.isDeclarationForLinker()) {
-                        declared_functions.push_back(&function);
+                        declared_functions.insert(&function);
                     }
                     else if (function.isStrongDefinitionForLinker()) {
                         defined_functions.push_back(&function);
                     }
                 });
         });
-
-    std::sort(declared_functions.begin(), declared_functions.end(), [](auto lhs, auto rhs) -> bool {
-        return lhs->getName().compare(rhs->getName()) < 0;
-    });
 
     std::sort(defined_functions.begin(), defined_functions.end(), [](auto lhs, auto rhs) -> bool {
         return lhs->getName().compare(rhs->getName()) < 0;
@@ -533,87 +537,16 @@ main(int argc, char **argv) {
     //     - if the function name is not associated with any interface, ignore it
     //
     //
-    std::vector<const Class *> klasses;
-
-    struct ClassSpec {
-        llvm::StringRef name;
-        std::vector<llvm::StringRef> path;
-        llvm::StructType *type = nullptr;
-
-        struct Method {
-            std::string name;
-            llvm::Function *function = nullptr;
-        };
-
-        std::vector<Method> methods;
-
-        Module *module = nullptr;
-    };
-
     std::for_each(
         input_modules.begin(), input_modules.end(),
-        [&interface_scope, &klasses](auto &input_module) -> void {
-            std::unordered_map<std::string, ClassSpec> class_specs;
+        [&interface_scope](auto& input_module) -> void {
+            input_module->loadAllClassesFromABI();
 
             std::for_each(
-                input_module->getLLModule()->begin(), input_module->getLLModule()->end(),
-                [&input_module, &class_specs](auto& function) -> void {
-                    if (!function.isStrongDefinitionForLinker()) {
-                        return;
-                    }
-
-                    auto names = parseClassPathAndMethodName(&function);
-                    if (!names) {
-                        return;
-                    }
-
-                    auto type = getSelfType(&function);
-                    if (!type) {
-                        return;
-                    }
-
-                    auto class_name  = canonicalizeClassPath(std::get<1>(*names));
-                    auto method_name = std::get<2>(*names);
-
-                    auto it = class_specs.find(class_name);
-                    if (it == class_specs.end()) {
-                        it = class_specs.insert({ class_name, {} }).first;
-
-                        it->second.name = std::get<0>(*names);
-                        it->second.path = std::get<1>(*names);
-                        it->second.type = *type;
-                        it->second.module = input_module.get();
-                    }
-
-                    it->second.methods.push_back({ method_name.str(), &function });
-                });
-
-            std::for_each(
-                class_specs.begin(), class_specs.end(),
-                [&interface_scope, &klasses](const auto& tmp) -> void {
-                    auto [ key, class_spec ] = tmp;
-
-                    std::vector<llvm::StringRef> names;
-                    std::vector<llvm::Function *> functions;
-                    names.reserve(class_spec.methods.size());
-                    functions.reserve(class_spec.methods.size());
-
-                    std::accumulate(
-                        class_spec.methods.begin(), class_spec.methods.end(),
-                        std::make_tuple(std::back_inserter(names), std::back_inserter(functions)),
-                        [](auto it, const auto& method) -> auto {
-                            auto [ it_name, it_type ] = it;
-
-                            *it_name++ = method.name;
-                            *it_type++ = method.function;
-
-                            return make_tuple(it_name, it_type);
-                        });
-
-                    auto klass = Class::create(class_spec.type, names, functions, class_spec.name, class_spec.module);
-                    klass->print(llvm::errs());
-
-                    interface_scope->insertClass(klass);
+                input_module->class_begin(), input_module->class_end(),
+                [&interface_scope](const auto& klass) -> void {
+                    klass.print(llvm::errs());
+                    interface_scope->insertClass(&klass);
                 });
         });
 
@@ -621,6 +554,16 @@ main(int argc, char **argv) {
         interface_scope->module()->getDispatcherList().begin(), interface_scope->module()->getDispatcherList().end(),
         [](const auto& dispatcher) -> void {
             dispatcher.dump();
+        });
+
+    auto output = std::make_unique<llair::Module>(output_filename, *llair_context);
+
+    linkModules(output.get(), interface_scope->module());
+
+    std::for_each(
+        input_modules.begin(), input_modules.end(),
+        [&output](auto &input_module) -> void {
+            linkModules(output.get(), input_module.get());
         });
 
     // Write it out:
@@ -633,7 +576,7 @@ main(int argc, char **argv) {
         return 1;
     }
 
-    llvm::WriteBitcodeToFile(interface_scope->module()->getLLModule(), output_file->os());
+    llvm::WriteBitcodeToFile(output->getLLModule(), output_file->os());
     output_file->keep();
 
     return 0;

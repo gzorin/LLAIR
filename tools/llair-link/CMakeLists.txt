@@ -15,5 +15,5 @@ target_include_directories(llair-link
   ${LLVM_INCLUDE_DIRS})
 
 target_link_libraries(llair-link
-  LLAIR LLAIRBitcode LLAIRLinker LLVMDemangleLib
+  LLAIR LLAIRBitcode LLAIRLinker LLAIRDemangleLib
   ${LLVM_LIBRARIES})

@@ -146,30 +146,47 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
                 block->setName(klass->getName());
                 builder->SetInsertPoint(block);
 
+                //
+                std::vector<llvm::Type *> params;
+                auto it_params = std::back_inserter(params);
+
+                // `that` type:
+                *it_params++ = *it_klass_method->getFunction()->getFunctionType()->param_begin();
+
+                // Other params:
+                std::copy(
+                    it_method->d_function->getFunctionType()->param_begin() + 1, it_method->d_function->getFunctionType()->param_end(),
+                    it_params);
+
+                auto klass_function_type = llvm::FunctionType::get(
+                    it_method->d_function->getReturnType(), params, false);
+
+                auto klass_function = d_module->getLLModule()->getOrInsertFunction(
+                    it_klass_method->getFunction()->getName(), klass_function_type);
+
+                //
+                std::vector<llvm::Value *> args;
+                args.reserve(klass_function_type->getNumParams());
+                auto it_args = std::back_inserter(args);
+
+                // `that`:
                 auto that = builder->CreateStructGEP(
                     nullptr,
                     builder->CreatePointerCast(
                         it_method->d_function->arg_begin(),
                         llvm::PointerType::get(type, 1)), 1);
 
-                std::vector<llvm::Value *> args;
-                args.reserve(it_klass_method->getFunction()->arg_size());
-
-                auto it_args = std::back_inserter(args);
-
                 *it_args++ = that;
 
+                // Other arguments:
                 std::transform(
                     it_method->d_function->arg_begin() + 1, it_method->d_function->arg_end(),
                     it_args,
-                    [](auto& arg) -> auto {
+                    [](auto& arg) -> llvm::Value * {
                         return &arg;
                     });
 
-                auto method_function = d_module->getLLModule()->getOrInsertFunction(
-                    it_klass_method->getFunction()->getName(), it_klass_method->getFunction()->getFunctionType());
-
-                auto call = builder->CreateCall(method_function, args);
+                auto call = builder->CreateCall(klass_function, args);
 
                 builder->CreateRet(call);
 

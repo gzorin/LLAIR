@@ -129,6 +129,9 @@ public:
 
     Class *getClass(llvm::StringRef) const;
 
+    Class *getOrLoadClassFromABI(llvm::StringRef);
+    std::size_t loadAllClassesFromABI();
+
     //
     const DispatcherListType& getDispatcherList() const { return d_dispatchers; }
     DispatcherListType&       getDispatcherList()       { return d_dispatchers; }

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <list>
 #include <vector>
 
 #include <llair/IR/Class.h>
@@ -8,8 +9,11 @@
 #include <llair/IR/EntryPoint.h>
 #include <llair/IR/Module.h>
 
+#include <llvm/ADT/Optional.h>
+#include <llvm/Demangle/ItaniumDemangle.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/Allocator.h>
 
 #include "LLAIRContextImpl.h"
 #include "Metadata.h"
@@ -19,10 +23,117 @@ namespace llair {
 namespace {
 
 llvm::StringRef s_data_layout =
-    "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-f80:128:128-v16:"
-    "16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:"
-    "256-v512:512:512-v1024:1024:1024-f80:128:128-n8:16:32";
+    "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v24:32:32-"
+    "v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-"
+    "v1024:1024:1024-n8:16:32";
 llvm::StringRef s_target_triple = "air64-apple-macosx10.14.0";
+
+class DefaultAllocator {
+    llvm::BumpPtrAllocator Alloc;
+
+public:
+    void reset() { Alloc.Reset(); }
+
+    template <typename T, typename... Args> T *makeNode(Args &&... args) {
+        return new (Alloc.Allocate(sizeof(T), alignof(T))) T(std::forward<Args>(args)...);
+    }
+
+    void *allocateNodeArray(size_t sz) {
+        return Alloc.Allocate(sizeof(llvm::itanium_demangle::Node *) * sz,
+                              alignof(llvm::itanium_demangle::Node));
+    }
+};
+
+using Demangler = llvm::itanium_demangle::ManglingParser<DefaultAllocator>;
+
+llvm::Optional<std::tuple<llvm::StringRef, std::vector<llvm::StringRef>, llvm::StringRef>>
+parseClassPathAndMethodName(const llvm::Function *function) {
+    using namespace llvm::itanium_demangle;
+
+    auto name = function->getName();
+
+    Demangler parser(name.begin(), name.end());
+    auto      ast = parser.parse();
+
+    if (!ast) {
+        return llvm::None;
+    }
+
+    if (ast->getKind() != Node::KFunctionEncoding) {
+        return llvm::None;
+    }
+
+    auto function_encoding = static_cast<FunctionEncoding *>(ast);
+
+    if (function_encoding->getName()->getKind() != Node::KNestedName) {
+        return llvm::None;
+    }
+
+    auto nested_name = static_cast<const NestedName *>(function_encoding->getName());
+
+    // Class name:
+    std::list<llvm::StringRef> path_parts;
+    std::size_t path_length = 0;
+
+    for (auto node = nested_name->Qual; node;) {
+        StringView identifier;
+
+        switch (node->getKind()) {
+        case Node::KNestedName: {
+            auto nested_name = static_cast<const NestedName *>(node);
+
+            node       = nested_name->Qual;
+            identifier = nested_name->Name->getBaseName();
+        } break;
+        case Node::KNameType: {
+            auto name_type = static_cast<const NameType *>(node);
+
+            node       = nullptr;
+            identifier = name_type->getName();
+        } break;
+        default:
+            node = nullptr;
+            break;
+        }
+
+        path_parts.push_front(llvm::StringRef(identifier.begin(),
+                                              std::distance(identifier.begin(), identifier.end())));
+        ++path_length;
+    }
+
+    llvm::StringRef qualified_name(
+        path_parts.front().begin(),
+        std::distance(path_parts.front().begin(), path_parts.back().end()));
+
+    std::vector<llvm::StringRef> path;
+    path.reserve(path_length);
+    std::copy(path_parts.begin(), path_parts.end(),
+              std::back_inserter(path));
+
+    // Mangled method name:
+    llvm::StringRef method_name(
+        nested_name->Name->getBaseName().begin(),
+        std::distance(nested_name->Name->getBaseName().begin(), name.end()));
+
+    return std::make_tuple(qualified_name, path, method_name);
+}
+
+llvm::Optional<llvm::StructType *>
+getSelfType(llvm::Function *function) {
+    auto first_param_type = function->getFunctionType()->getParamType(0);
+
+    auto pointer_type = llvm::dyn_cast<llvm::PointerType>(first_param_type);
+    if (!pointer_type) {
+        return llvm::None;
+    }
+
+    auto self_type = llvm::dyn_cast<llvm::StructType>(pointer_type->getElementType());
+    if (!self_type) {
+        return llvm::None;
+    }
+
+    return self_type;
+}
 
 } // namespace
 
@@ -194,6 +305,124 @@ Module::getClass(llvm::StringRef name) const {
     }
 
     return static_cast<Class *>(named);
+}
+
+struct ClassSpec {
+    llvm::StructType *type = nullptr;
+    std::vector<llvm::StringRef> method_names;
+    std::vector<llvm::Function *> method_functions;
+
+    bool valid() const {
+        return type != nullptr && !method_names.empty() && !method_functions.empty() && method_names.size() == method_functions.size();
+    }
+};
+
+Class *
+Module::getOrLoadClassFromABI(llvm::StringRef name) {
+    auto named = d_class_symbol_table.lookup(name);
+    if (named) {
+        return static_cast<Class *>(named);
+    }
+
+    ClassSpec class_spec;
+
+    std::for_each(
+        getLLModule()->begin(), getLLModule()->end(),
+        [this, name, &class_spec](auto &function) -> void {
+            if (!function.isStrongDefinitionForLinker()) {
+                return;
+            }
+
+            auto names = parseClassPathAndMethodName(&function);
+            if (!names) {
+                return;
+            }
+
+            auto class_name  = std::get<0>(*names);
+            auto method_name = std::get<2>(*names);
+
+            if (class_name != name) {
+                return;
+            }
+
+            auto type = getSelfType(&function);
+            if (!type) {
+                return;
+            }
+
+            if (!class_spec.type) {
+                class_spec.type = *type;
+            }
+            assert(class_spec.type == *type);
+
+            class_spec.method_names.push_back(method_name);
+            class_spec.method_functions.push_back(&function);
+        });
+
+    if (!class_spec.valid()) {
+        return nullptr;
+    }
+
+    return Class::create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
+}
+
+std::size_t
+Module::loadAllClassesFromABI() {
+    llvm::StringMap<ClassSpec> class_specs;
+
+    std::for_each(
+        getLLModule()->begin(), getLLModule()->end(),
+        [this, &class_specs](auto &function) -> void {
+            if (!function.isStrongDefinitionForLinker()) {
+                return;
+            }
+
+            auto names = parseClassPathAndMethodName(&function);
+            if (!names) {
+                return;
+            }
+
+            auto class_name  = std::get<0>(*names);
+            auto method_name = std::get<2>(*names);
+
+            auto type = getSelfType(&function);
+            if (!type) {
+                return;
+            }
+
+            auto& class_spec = class_specs[class_name];
+
+            if (!class_spec.type) {
+                class_spec.type = *type;
+            }
+            assert(class_spec.type == *type);
+
+            class_spec.method_names.push_back(method_name);
+            class_spec.method_functions.push_back(&function);
+        });
+
+    std::size_t count = 0;
+
+    std::for_each(
+        class_specs.begin(), class_specs.end(),
+        [this, &count](const auto& entry) -> void {
+            auto name = entry.getKey();
+            const auto& class_spec = entry.getValue();
+
+            auto named = d_class_symbol_table.lookup(name);
+            if (named) {
+                return;
+            }
+
+            if (!class_spec.valid()) {
+                return;
+            }
+
+            Class::create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
+            ++count;
+        });
+
+    return count;
 }
 
 namespace {
