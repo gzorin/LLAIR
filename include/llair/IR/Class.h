@@ -7,6 +7,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/ilist_node.h>
+#include <llvm/IR/TrackingMDRef.h>
 
 #include <string>
 
@@ -39,10 +40,12 @@ public:
         std::string      d_name;
         llvm::Function  *d_function = nullptr;
 
+        llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
+
         friend class Class;
     };
 
-    static Class *create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef = "", Module * = nullptr);
+    static Class *Create(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef = "", Module * = nullptr);
 
     ~Class();
 
@@ -63,6 +66,9 @@ public:
 
     bool doesImplement(const Interface *) const;
 
+    llvm::MDNode *      metadata() { return d_md.get(); }
+    const llvm::MDNode *metadata() const { return d_md.get(); }
+
     void print(llvm::raw_ostream&) const;
 
     void dump() const override;
@@ -70,6 +76,7 @@ public:
 private:
 
     Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef, Module *);
+    Class(llvm::MDNode *, Module *);
 
     void setModule(Module *);
 
@@ -83,7 +90,10 @@ private:
 
     Module *d_module = nullptr;
 
+    llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
+
     friend struct module_ilist_traits<Class>;
+    friend class Module;
 };
 
 } // End namespace llair

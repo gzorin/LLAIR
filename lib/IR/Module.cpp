@@ -363,7 +363,7 @@ Module::getOrLoadClassFromABI(llvm::StringRef name) {
         return nullptr;
     }
 
-    return Class::create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
+    return Class::Create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
 }
 
 std::size_t
@@ -418,7 +418,7 @@ Module::loadAllClassesFromABI() {
                 return;
             }
 
-            Class::create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
+            Class::Create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
             ++count;
         });
 
@@ -537,6 +537,16 @@ Module::syncMetadata() {
                                               [](EntryPoint *entry_point) -> void {}, Compare());
             }
         }
+    }
+
+    // Classes:
+    {
+        auto md = d_llmodule->getNamedMetadata("llair.class");
+    }
+
+    // Dispatchers:
+    {
+        auto md = d_llmodule->getNamedMetadata("llair.dispatcher");
     }
 }
 

@@ -1,5 +1,6 @@
 #include <llair/IR/Interface.h>
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
@@ -21,8 +22,12 @@ Interface::Interface(LLAIRContext& context, llvm::StructType *type, llvm::ArrayR
     auto it_qualifiedName = qualifiedNames.begin();
     auto it_type = types.begin();
 
+    std::vector<llvm::Metadata *> method_mds;
+    method_mds.reserve(d_method_count);
+
     for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_name, ++it_qualifiedName, ++it_type) {
-        new (p_method) Method(*it_name, *it_qualifiedName, *it_type);
+        auto method = new (p_method) Method(*it_name, *it_qualifiedName, *it_type);
+        method_mds.push_back(method->d_md);
     }
 
     std::sort(
@@ -30,6 +35,14 @@ Interface::Interface(LLAIRContext& context, llvm::StructType *type, llvm::ArrayR
         [](const auto &lhs, const auto &rhs) -> auto {
             return lhs.getName() < rhs.getName();
         });
+
+    auto& ll_context = context.getLLContext();
+
+    d_md = llvm::MDTuple::get(
+        ll_context,
+        { llvm::ConstantAsMetadata::get(
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(d_type, 0))),
+          llvm::MDTuple::get(ll_context, method_mds) } );
 }
 
 Interface::~Interface() {
@@ -102,6 +115,14 @@ Interface::Method::Method(llvm::StringRef name, llvm::StringRef qualifiedName, l
 : d_name(name)
 , d_qualifiedName(qualifiedName)
 , d_type(type) {
+    auto& ll_context = d_type->getContext();
+
+    d_md = llvm::MDTuple::get(ll_context, {
+        llvm::MDString::get(ll_context, d_name),
+        llvm::MDString::get(ll_context, d_qualifiedName),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantPointerNull::get(llvm::PointerType::get(d_type, 0)))
+    });
 }
 
 } // End namespace llair

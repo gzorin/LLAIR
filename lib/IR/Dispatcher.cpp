@@ -34,14 +34,28 @@ Dispatcher::Dispatcher(const Interface *interface, Module *module)
     auto p_method = d_methods;
     auto it_interface_method = d_interface->method_begin();
 
+    std::vector<llvm::Metadata *> method_mds;
+    method_mds.reserve(d_method_count);
+
     for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_interface_method) {
-        new (p_method) Method(d_interface, it_interface_method, nullptr);
+        auto method = new (p_method) Method(d_interface, it_interface_method, nullptr);
+        method_mds.push_back(method->d_md.get());
     }
+
+    auto& ll_context = d_interface->getContext().getLLContext();
+
+    d_md.reset(llvm::MDTuple::get(
+        ll_context,
+        { d_interface->metadata(),
+          llvm::MDTuple::get(ll_context, method_mds) } ));
 
     if (module) {
         module->getDispatcherList().push_back(this);
     }
     assert(d_module == module);
+}
+
+Dispatcher::Dispatcher(llvm::MDNode *, Module *module) {
 }
 
 Dispatcher::~Dispatcher() {
@@ -62,6 +76,19 @@ Dispatcher::setModule(Module *module) {
         std::for_each(
             d_methods, d_methods + d_method_count,
             [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().remove(method.getFunction()); });
+
+        if (d_module->getLLModule() && d_md) {
+            auto dispatchers_md = d_module->getLLModule()->getNamedMetadata("llair.dispatcher");
+
+            if (dispatchers_md) {
+                auto it =
+                    std::find(dispatchers_md->op_begin(), dispatchers_md->op_end(), d_md.get());
+                if (it != dispatchers_md->op_end()) {
+                    dispatchers_md->setOperand(std::distance(dispatchers_md->op_begin(), it),
+                                               nullptr);
+                }
+            }
+        }
     }
 
     d_module = module;
@@ -70,11 +97,16 @@ Dispatcher::setModule(Module *module) {
         std::for_each(
             d_methods, d_methods + d_method_count,
             [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().push_back(method.getFunction()); });
+
+        if (d_module->getLLModule() && d_md) {
+            auto dispatchers_md = d_module->getLLModule()->getOrInsertNamedMetadata("llair.dispatcher");
+            dispatchers_md->addOperand(d_md.get());
+        }
     }
 }
 
 Dispatcher *
-Dispatcher::create(const Interface *interface, Module *module) {
+Dispatcher::Create(const Interface *interface, Module *module) {
     auto dispatcher = new Dispatcher(interface, module);
     return dispatcher;
 }
@@ -108,7 +140,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
     assert(it_implementation == d_implementations.end());
     it_implementation = d_implementations.insert({ kind, { klass->getName().str() } }).first;
 
-    auto& ll_context = d_module->getLLContext();
+    auto& ll_context = d_interface->getContext().getLLContext();
 
     auto type = llvm::StructType::get(
         ll_context, std::vector<llvm::Type *>{
@@ -249,6 +281,8 @@ Dispatcher::Method::Method(const Interface *interface, const Interface::Method *
 
     d_switcher = builder->CreateSwitch(kind,
         llvm::BasicBlock::Create(ll_context, "", d_function));
+
+    d_md.reset(llvm::ConstantAsMetadata::get(d_function));
 }
 
 Dispatcher::Method::~Method() {

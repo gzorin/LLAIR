@@ -37,7 +37,7 @@ struct InterfaceKeyInfo {
         }
 
         bool operator==(const KeyTy& that) const {
-            if (type != that.type) {
+            if (type != that.type && !type->isLayoutIdentical(that.type)) {
                 return false;
             }
 

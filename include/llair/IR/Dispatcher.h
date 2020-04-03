@@ -8,6 +8,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/ilist_node.h>
+#include <llvm/IR/TrackingMDRef.h>
 
 #include <string>
 
@@ -43,10 +44,12 @@ public:
         llvm::Function          *d_function = nullptr;
         llvm::SwitchInst        *d_switcher = nullptr;
 
+        llvm::TypedTrackingMDRef<llvm::ConstantAsMetadata> d_md;
+
         friend class Dispatcher;
     };
 
-    static Dispatcher *create(const Interface *, Module * = nullptr);
+    static Dispatcher *Create(const Interface *, Module * = nullptr);
 
     ~Dispatcher();
 
@@ -68,6 +71,9 @@ public:
     void insertImplementation(uint32_t, const Class *);
     void removeImplementation(uint32_t);
 
+    llvm::MDNode *      metadata() { return d_md.get(); }
+    const llvm::MDNode *metadata() const { return d_md.get(); }
+
     void print(llvm::raw_ostream&) const;
 
     void dump() const;
@@ -75,6 +81,7 @@ public:
 private:
 
     Dispatcher(const Interface *, Module *);
+    Dispatcher(llvm::MDNode *, Module *);
 
     void setModule(Module *);
 
@@ -91,7 +98,10 @@ private:
 
     llvm::DenseMap<uint32_t, Implementation> d_implementations;
 
+    llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
+
     friend struct module_ilist_traits<Dispatcher>;
+    friend class Module;
 };
 
 } // End namespace llair

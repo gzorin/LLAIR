@@ -7,6 +7,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/Metadata.h>
 
 #include <string>
 
@@ -38,6 +39,8 @@ public:
         std::string         d_qualifiedName;
         llvm::FunctionType *d_type = nullptr;
 
+        llvm::MDTuple *d_md = nullptr;
+
         friend class Interface;
     };
 
@@ -62,6 +65,8 @@ public:
 
     const Method *findMethod(llvm::StringRef) const;
 
+    llvm::MDNode *      metadata() const { return d_md; }
+
     void print(llvm::raw_ostream&) const;
 
     void dump() const;
@@ -76,6 +81,8 @@ private:
 
     std::size_t d_method_count = 0;
     Method *    d_methods      = nullptr;
+
+    llvm::MDNode *d_md = nullptr;
 };
 
 } // End namespace llair

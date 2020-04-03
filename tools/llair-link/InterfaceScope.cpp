@@ -19,7 +19,7 @@ InterfaceScope::~InterfaceScope() {
 
 void
 InterfaceScope::insertInterface(Interface *interface) {
-    auto it_dispatcher = d_dispatchers.insert({ interface, Dispatcher::create(interface, d_module.get()) }).first;
+    auto it_dispatcher = d_dispatchers.insert({ interface, Dispatcher::Create(interface, d_module.get()) }).first;
 
     // Find all classes that match `interface`:
     std::for_each(

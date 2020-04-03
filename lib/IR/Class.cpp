@@ -33,8 +33,12 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     auto it_name = names.begin();
     auto it_function = functions.begin();
 
+    std::vector<llvm::Metadata *> method_mds;
+    method_mds.reserve(d_method_count);
+
     for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_name, ++it_function) {
-        new (p_method) Method(*it_name, *it_function);
+        auto method = new (p_method) Method(*it_name, *it_function);
+        method_mds.push_back(method->d_md.get());
     }
 
     std::sort(d_methods, d_methods + d_method_count, [](const auto &lhs, const auto &rhs) -> auto {
@@ -43,6 +47,20 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
 
     setName(name);
 
+    auto& ll_context = d_type->getContext();
+
+    d_md.reset(llvm::MDTuple::get(
+        ll_context,
+        { llvm::MDString::get(ll_context, getName()),
+          llvm::MDTuple::get(ll_context, method_mds) } ));
+
+    if (module) {
+        module->getClassList().push_back(this);
+    }
+    assert(d_module == module);
+}
+
+Class::Class(llvm::MDNode *, Module *module) {
     if (module) {
         module->getClassList().push_back(this);
     }
@@ -65,17 +83,35 @@ Class::setModule(Module *module) {
 
     if (d_module) {
         setSymbolTable(nullptr);
+
+        if (d_module->getLLModule() && d_md) {
+            auto class_md = d_module->getLLModule()->getNamedMetadata("llair.class");
+
+            if (class_md) {
+                auto it =
+                    std::find(class_md->op_begin(), class_md->op_end(), d_md.get());
+                if (it != class_md->op_end()) {
+                    class_md->setOperand(std::distance(class_md->op_begin(), it),
+                                         nullptr);
+                }
+            }
+        }
     }
 
     d_module = module;
 
     if (d_module) {
         setSymbolTable(&d_module->getClassSymbolTable());
+
+        if (d_module->getLLModule() && d_md) {
+            auto dispatchers_md = d_module->getLLModule()->getOrInsertNamedMetadata("llair.class");
+            dispatchers_md->addOperand(d_md.get());
+        }
     }
 }
 
 Class *
-Class::create(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, llvm::StringRef name, Module *module) {
+Class::Create(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, llvm::StringRef name, Module *module) {
     auto interface = new Class(type, names, functions, name, module);
     return interface;
 }
@@ -157,6 +193,11 @@ Class::getContext() const {
 Class::Method::Method(llvm::StringRef name, llvm::Function *function)
 : d_name(name)
 , d_function(function) {
+    auto& ll_context = function->getFunctionType()->getContext();
+
+    d_md.reset(llvm::MDTuple::get(ll_context,
+        { llvm::MDString::get(ll_context, d_name),
+          llvm::ConstantAsMetadata::get(d_function) } ));
 }
 
 } // End namespace llair
