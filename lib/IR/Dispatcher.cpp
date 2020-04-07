@@ -164,7 +164,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
 
                 llvm::BasicBlock *block = nullptr;
 
-                if (it_method->d_switcher->getNumCases() == 0) {
+                if (it_method->d_switcher->getDefaultDest()->empty()) {
                     block = it_method->d_switcher->getDefaultDest();
                 }
                 else {
@@ -225,6 +225,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
                 ++it_interface_method;
                 ++it_method;
             }
+
             ++it_klass_method;
         }
     }
