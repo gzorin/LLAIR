@@ -261,10 +261,6 @@ Dispatcher::Method::Method(const Interface *interface, const Interface::Method *
 : d_interface_method(interface_method) {
     auto& ll_context = interface->getContext().getLLContext();
 
-    auto abstract_that_type = llvm::StructType::get(ll_context, std::vector<llvm::Type *>{
-        llvm::Type::getInt32Ty(ll_context)
-    });
-
     d_function = llvm::Function::Create(
         d_interface_method->getType(), llvm::GlobalValue::ExternalLinkage, d_interface_method->getQualifiedName(),
         module ? module->getLLModule() : nullptr);
@@ -274,8 +270,7 @@ Dispatcher::Method::Method(const Interface *interface, const Interface::Method *
     builder->SetInsertPoint(
         llvm::BasicBlock::Create(ll_context, "entry", d_function));
 
-    auto abstract_that = builder->CreatePointerCast(
-        d_function->arg_begin(), llvm::PointerType::get(abstract_that_type, 1));
+    auto abstract_that = d_function->arg_begin();
 
     auto kind = builder->CreateLoad(
         builder->CreateStructGEP(nullptr, abstract_that, 0));
