@@ -17,6 +17,7 @@ namespace llvm {
 class LLVMContext;
 class Module;
 class ValueSymbolTable;
+class raw_ostream;
 } // End namespace llvm
 
 namespace llair {
@@ -151,6 +152,10 @@ public:
 
     //
     void syncMetadata();
+
+    void print(llvm::raw_ostream&) const;
+
+    void dump() const;
 
 private:
 

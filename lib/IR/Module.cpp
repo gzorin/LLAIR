@@ -14,6 +14,8 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Allocator.h>
+#include <llvm/Support/Debug.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include "LLAIRContextImpl.h"
 #include "Metadata.h"
@@ -542,12 +544,40 @@ Module::syncMetadata() {
     // Classes:
     {
         auto md = d_llmodule->getNamedMetadata("llair.class");
+
+        if (md) {
+            std::for_each(
+                md->op_begin(), md->op_end(),
+                [this](auto md) -> void {
+                    Class::Create(md, this);
+                });
+        }
     }
 
     // Dispatchers:
     {
         auto md = d_llmodule->getNamedMetadata("llair.dispatcher");
     }
+}
+
+void
+Module::print(llvm::raw_ostream& os) const {
+    std::for_each(
+        class_begin(), class_end(),
+        [&os](const auto& klass) -> void {
+            klass.print(os);
+        });
+
+    std::for_each(
+        dispatcher_begin(), dispatcher_end(),
+        [&os](const auto& dispatcher) -> void {
+            dispatcher.print(os);
+        });
+}
+
+void
+Module::dump() const {
+    print(llvm::dbgs());
 }
 
 } // End namespace llair

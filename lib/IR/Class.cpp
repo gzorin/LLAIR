@@ -2,6 +2,7 @@
 #include <llair/IR/Interface.h>
 #include <llair/IR/Module.h>
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Support/Debug.h>
@@ -52,6 +53,8 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     d_md.reset(llvm::MDTuple::get(
         ll_context,
         { llvm::MDString::get(ll_context, getName()),
+          llvm::ConstantAsMetadata::get(
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(d_type, 0))),
           llvm::MDTuple::get(ll_context, method_mds) } ));
 
     if (module) {
@@ -60,11 +63,33 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     assert(d_module == module);
 }
 
-Class::Class(llvm::MDNode *, Module *module) {
+Class::Class(llvm::Metadata *md, Module *module) {
     if (module) {
         module->getClassList().push_back(this);
     }
     assert(d_module == module);
+
+    d_md.reset(llvm::cast<llvm::MDTuple>(md));
+
+    d_type = llvm::cast<llvm::StructType>(
+        llvm::mdconst::extract<llvm::ConstantPointerNull>(d_md->getOperand(1).get())->
+            getType()->
+                getElementType());
+
+    auto methods_md = llvm::cast<llvm::MDTuple>(d_md->getOperand(2).get());
+
+    d_method_count = methods_md->getNumOperands();
+    d_methods = std::allocator<Method>().allocate(d_method_count);
+
+    auto p_method = d_methods;
+    auto it_methods_md = methods_md->op_begin();
+
+    for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_methods_md) {
+        auto method = new (p_method) Method(it_methods_md->get());
+    }
+
+    auto name_md = llvm::cast<llvm::MDString>(d_md->getOperand(0).get());
+    setName(name_md->getString());
 }
 
 Class::~Class() {
@@ -112,8 +137,14 @@ Class::setModule(Module *module) {
 
 Class *
 Class::Create(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, llvm::StringRef name, Module *module) {
-    auto interface = new Class(type, names, functions, name, module);
-    return interface;
+    auto klass = new Class(type, names, functions, name, module);
+    return klass;
+}
+
+Class *
+Class::Create(llvm::Metadata *md, Module *module) {
+    auto klass = new Class(md, module);
+    return klass;
 }
 
 const Class::Method *
@@ -190,14 +221,26 @@ Class::getContext() const {
     return *LLAIRContext::Get(&d_type->getContext());
 }
 
-Class::Method::Method(llvm::StringRef name, llvm::Function *function)
-: d_name(name)
-, d_function(function) {
+Class::Method::Method(llvm::StringRef name, llvm::Function *function) {
     auto& ll_context = function->getFunctionType()->getContext();
 
     d_md.reset(llvm::MDTuple::get(ll_context,
-        { llvm::MDString::get(ll_context, d_name),
-          llvm::ConstantAsMetadata::get(d_function) } ));
+        { llvm::MDString::get(ll_context, name),
+          llvm::ConstantAsMetadata::get(function) } ));
+}
+
+Class::Method::Method(llvm::Metadata *md) {
+    d_md.reset(llvm::cast<llvm::MDTuple>(md));
+}
+
+llvm::StringRef
+Class::Method::getName() const {
+    return llvm::cast<llvm::MDString>(d_md->getOperand(0).get())->getString();
+}
+
+llvm::Function *
+Class::Method::getFunction() const {
+    return llvm::mdconst::extract<llvm::Function>(d_md->getOperand(1).get());
 }
 
 } // End namespace llair

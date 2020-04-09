@@ -30,15 +30,13 @@ public:
     class Method {
     public:
 
-        llvm::StringRef getName()     const { return d_name;     }
-        llvm::Function *getFunction() const { return d_function; }
+        llvm::StringRef getName()     const;
+        llvm::Function *getFunction() const;
 
     private:
 
         Method(llvm::StringRef, llvm::Function *);
-
-        std::string      d_name;
-        llvm::Function  *d_function = nullptr;
+        Method(llvm::Metadata *);
 
         llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
 
@@ -66,8 +64,8 @@ public:
 
     bool doesImplement(const Interface *) const;
 
-    llvm::MDNode *      metadata() { return d_md.get(); }
-    const llvm::MDNode *metadata() const { return d_md.get(); }
+    llvm::Metadata *      metadata() { return d_md.get(); }
+    const llvm::Metadata *metadata() const { return d_md.get(); }
 
     void print(llvm::raw_ostream&) const;
 
@@ -75,8 +73,10 @@ public:
 
 private:
 
+    static Class *Create(llvm::Metadata *, Module * = nullptr);
+
     Class(llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::Function *>, llvm::StringRef, Module *);
-    Class(llvm::MDNode *, Module *);
+    Class(llvm::Metadata *, Module *);
 
     void setModule(Module *);
 
@@ -90,7 +90,7 @@ private:
 
     Module *d_module = nullptr;
 
-    llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
 
     friend struct module_ilist_traits<Class>;
     friend class Module;
