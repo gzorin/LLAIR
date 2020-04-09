@@ -148,6 +148,8 @@ public:
         return &Module::d_dispatchers;
     }
 
+    std::size_t loadAllDispatchersFromABI();
+
     //
     void syncMetadata();
 

@@ -385,6 +385,11 @@ Module::loadAllClassesFromABI() {
             }
 
             auto class_name  = std::get<0>(*names);
+
+            if (getClass(class_name)) {
+                return;
+            }
+
             auto method_name = std::get<2>(*names);
 
             auto type = getSelfType(&function);
@@ -425,6 +430,59 @@ Module::loadAllClassesFromABI() {
         });
 
     return count;
+}
+
+struct InterfaceSpec {
+    llvm::StructType *type = nullptr;
+
+    std::vector<llvm::StringRef> method_names;
+    std::vector<llvm::StringRef> method_qualified_names;
+    std::vector<llvm::FunctionType *> method_types;
+};
+
+std::size_t
+Module::loadAllDispatchersFromABI() {
+    llvm::StringMap<InterfaceSpec> interface_specs;
+
+    std::for_each(
+        getLLModule()->begin(), getLLModule()->end(),
+        [this, &interface_specs](auto &function) -> void {
+            if (!function.isDeclarationForLinker()) {
+                return;
+            }
+
+            auto names = parseClassPathAndMethodName(&function);
+            if (!names) {
+                return;
+            }
+
+            auto interface_name  = std::get<0>(*names);
+            auto method_name = std::get<2>(*names);
+
+            auto type = getSelfType(&function);
+            if (!type) {
+                return;
+            }
+
+            auto& interface_spec = interface_specs[interface_name];
+
+            if (!interface_spec.type) {
+                interface_spec.type = *type;
+            }
+            assert(interface_spec.type == *type);
+
+            interface_spec.method_names.push_back(method_name);
+            interface_spec.method_qualified_names.push_back(function.getName());
+            interface_spec.method_types.push_back(function.getFunctionType());
+        });
+
+    std::for_each(
+        interface_specs.begin(), interface_specs.end(),
+        [this](const auto& entry) -> void {
+            const auto& interface_spec = entry.getValue();
+
+            auto interface = Interface::get(getContext(), interface_spec.type, interface_spec.method_names, interface_spec.method_qualified_names, interface_spec.method_types);
+        });
 }
 
 namespace {
