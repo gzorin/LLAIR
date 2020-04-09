@@ -34,11 +34,12 @@ public:
         ~Method();
 
         llvm::StringRef getName()     const { return d_interface_method->getName();     }
-        llvm::Function *getFunction() const { return d_function; }
+        llvm::Function *getFunction() const;
 
     private:
 
-        Method(const Interface *, const Interface::Method *, Module *);
+        Method(const Interface *, const Interface::Method *);
+        Method(llvm::Metadata *, const Interface::Method *);
 
         const Interface::Method *d_interface_method = nullptr;
         llvm::Function          *d_function = nullptr;
@@ -64,15 +65,15 @@ public:
     method_iterator       method_end() { return d_methods + method_size(); }
     const method_iterator method_end() const { return d_methods + method_size(); }
 
-    std::size_t method_size() const { return d_method_count; }
+    std::size_t method_size() const;
 
     const Method *findMethod(llvm::StringRef) const;
 
     void insertImplementation(uint32_t, const Class *);
     void removeImplementation(uint32_t);
 
-    llvm::MDNode *      metadata() { return d_md.get(); }
-    const llvm::MDNode *metadata() const { return d_md.get(); }
+    llvm::Metadata *      metadata() { return d_md.get(); }
+    const llvm::Metadata *metadata() const { return d_md.get(); }
 
     void print(llvm::raw_ostream&) const;
 
@@ -80,15 +81,16 @@ public:
 
 private:
 
+    static Dispatcher *Create(llvm::Metadata *, Module * = nullptr);
+
     Dispatcher(const Interface *, Module *);
-    Dispatcher(llvm::MDNode *, Module *);
+    Dispatcher(llvm::Metadata *, Module *);
 
     void setModule(Module *);
 
     const Interface *d_interface = nullptr;
 
-    std::size_t d_method_count = 0;
-    Method     *d_methods      = nullptr;
+    Method *d_methods      = nullptr;
 
     Module *d_module = nullptr;
 
@@ -98,7 +100,7 @@ private:
 
     llvm::DenseMap<uint32_t, Implementation> d_implementations;
 
-    llvm::TypedTrackingMDRef<llvm::MDNode>          d_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
 
     friend struct module_ilist_traits<Dispatcher>;
     friend class Module;

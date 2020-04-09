@@ -543,20 +543,72 @@ Module::syncMetadata() {
 
     // Classes:
     {
+        std::vector<Class *> classes;
+        std::transform(
+            d_classes.begin(), d_classes.end(),
+            std::back_inserter(classes),
+            [](auto &klass) -> Class * { return &klass; });
+        std::sort(
+            classes.begin(), classes.end(),
+            [](auto lhs, auto rhs) -> bool { return lhs->metadata() < rhs->metadata(); });
+
         auto md = d_llmodule->getNamedMetadata("llair.class");
 
         if (md) {
-            std::for_each(
+            struct Compare {
+                bool operator()(llvm::Metadata *lhs, Class *rhs) const {
+                    return lhs < rhs->metadata();
+                }
+                bool operator()(Class *lhs, llvm::Metadata *rhs) const {
+                    return lhs->metadata() < rhs;
+                }
+            };
+
+            for_each_symmetric_difference(
                 md->op_begin(), md->op_end(),
-                [this](auto md) -> void {
+                classes.begin(), classes.end(),
+                [&](llvm::Metadata *md) -> void {
                     Class::Create(md, this);
-                });
+                },
+                [](Class *) -> void {
+                },
+                Compare());
         }
     }
 
     // Dispatchers:
     {
+        std::vector<Dispatcher *> dispatchers;
+        std::transform(
+            d_dispatchers.begin(), d_dispatchers.end(),
+            std::back_inserter(dispatchers),
+            [](auto &dispatcher) -> Dispatcher * { return &dispatcher; });
+        std::sort(
+            dispatchers.begin(), dispatchers.end(),
+            [](auto lhs, auto rhs) -> bool { return lhs->metadata() < rhs->metadata(); });
+
         auto md = d_llmodule->getNamedMetadata("llair.dispatcher");
+
+        if (md) {
+            struct Compare {
+                bool operator()(llvm::Metadata *lhs, Dispatcher *rhs) const {
+                    return lhs < rhs->metadata();
+                }
+                bool operator()(Dispatcher *lhs, llvm::Metadata *rhs) const {
+                    return lhs->metadata() < rhs;
+                }
+            };
+
+            for_each_symmetric_difference(
+                md->op_begin(), md->op_end(),
+                dispatchers.begin(), dispatchers.end(),
+                [&](llvm::Metadata *md) -> void {
+                    Dispatcher::Create(md, this);
+                },
+                [](Dispatcher *) -> void {
+                },
+                Compare());
+        }
     }
 }
 

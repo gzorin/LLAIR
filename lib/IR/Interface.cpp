@@ -69,6 +69,45 @@ Interface::get(LLAIRContext& context, llvm::StructType *type, llvm::ArrayRef<llv
     return interface;
 }
 
+Interface *
+Interface::get(llvm::Metadata *md) {
+    auto md_tuple = llvm::cast<llvm::MDTuple>(md);
+
+    auto context = LLAIRContext::Get(&md_tuple->getContext());
+
+    auto type = llvm::cast<llvm::StructType>(
+        llvm::mdconst::extract<llvm::ConstantPointerNull>(md_tuple->getOperand(0).get())->
+            getType()->
+                getElementType());
+
+    auto methods_md = llvm::cast<llvm::MDTuple>(md_tuple->getOperand(1).get());
+
+    std::vector<llvm::StringRef> names;
+    names.reserve(methods_md->getNumOperands());
+
+    std::vector<llvm::StringRef> qualifiedNames;
+    qualifiedNames.reserve(methods_md->getNumOperands());
+
+    std::vector<llvm::FunctionType *> types;
+    types.reserve(methods_md->getNumOperands());
+
+    std::for_each(
+        methods_md->op_begin(), methods_md->op_end(),
+        [&names, &qualifiedNames, &types](const auto& tmp) -> void {
+            auto method_md = llvm::cast<llvm::MDTuple>(tmp.get());
+
+            names.push_back(llvm::cast<llvm::MDString>(method_md->getOperand(0).get())->getString());
+            qualifiedNames.push_back(llvm::cast<llvm::MDString>(method_md->getOperand(1).get())->getString());
+            types.push_back(
+                llvm::cast<llvm::FunctionType>(
+                    llvm::mdconst::extract<llvm::ConstantPointerNull>(method_md->getOperand(2).get())->
+                        getType()->
+                            getElementType()));
+        });
+
+    return Interface::get(*context, type, names, qualifiedNames, types);
+}
+
 const Interface::Method *
 Interface::findMethod(llvm::StringRef name) const {
     struct Compare {

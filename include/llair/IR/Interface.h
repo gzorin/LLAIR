@@ -45,6 +45,7 @@ public:
     };
 
     static Interface *get(LLAIRContext&, llvm::StructType *, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::StringRef>, llvm::ArrayRef<llvm::FunctionType *>);
+    static Interface *get(llvm::Metadata *);
 
     ~Interface();
 
@@ -65,7 +66,7 @@ public:
 
     const Method *findMethod(llvm::StringRef) const;
 
-    llvm::MDNode *      metadata() const { return d_md; }
+    llvm::Metadata *metadata() const { return d_md; }
 
     void print(llvm::raw_ostream&) const;
 
@@ -82,7 +83,7 @@ private:
     std::size_t d_method_count = 0;
     Method *    d_methods      = nullptr;
 
-    llvm::MDNode *d_md = nullptr;
+    llvm::MDTuple *d_md = nullptr;
 };
 
 } // End namespace llair

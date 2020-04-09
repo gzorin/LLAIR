@@ -27,18 +27,19 @@ module_ilist_traits<llair::Dispatcher>::removeNodeFromList(llair::Dispatcher *di
 }
 
 Dispatcher::Dispatcher(const Interface *interface, Module *module)
-    : d_interface(interface)
-    , d_method_count(d_interface->method_size()) {
-    d_methods = std::allocator<Method>().allocate(d_method_count);
+: d_interface(interface) {
+    auto method_count = method_size();
+
+    d_methods = std::allocator<Method>().allocate(method_count);
 
     auto p_method = d_methods;
     auto it_interface_method = d_interface->method_begin();
 
     std::vector<llvm::Metadata *> method_mds;
-    method_mds.reserve(d_method_count);
+    method_mds.reserve(method_count);
 
-    for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_interface_method) {
-        auto method = new (p_method) Method(d_interface, it_interface_method, nullptr);
+    for (auto n = method_count; n > 0; --n, ++p_method, ++it_interface_method) {
+        auto method = new (p_method) Method(d_interface, it_interface_method);
         method_mds.push_back(method->d_md.get());
     }
 
@@ -55,15 +56,43 @@ Dispatcher::Dispatcher(const Interface *interface, Module *module)
     assert(d_module == module);
 }
 
-Dispatcher::Dispatcher(llvm::MDNode *, Module *module) {
+Dispatcher::Dispatcher(llvm::Metadata *md, Module *module) {
+    if (module) {
+        module->getDispatcherList().push_back(this);
+    }
+    assert(d_module == module);
+
+    d_md.reset(llvm::cast<llvm::MDTuple>(md));
+
+    auto interface_md = d_md->getOperand(0).get();
+
+    d_interface = Interface::get(interface_md);
+
+    d_interface->dump();
+
+    auto method_count = method_size();
+
+    auto methods_md = llvm::cast<llvm::MDTuple>(d_md->getOperand(1).get());
+
+    d_methods = std::allocator<Method>().allocate(method_count);
+
+    auto p_method = d_methods;
+    auto it_interface_method = d_interface->method_begin();
+    auto it_methods_md = methods_md->op_begin();
+
+    for (auto n = method_count; n > 0; --n, ++p_method, ++it_interface_method, ++it_methods_md) {
+        auto method = new (p_method) Method(it_methods_md->get(), it_interface_method);
+    }
 }
 
 Dispatcher::~Dispatcher() {
+    auto method_count = method_size();
+
     std::for_each(
-        d_methods, d_methods + d_method_count,
+        d_methods, d_methods + method_count,
         [](auto &method) -> void { method.~Method(); });
 
-    std::allocator<Method>().deallocate(d_methods, d_method_count);
+    std::allocator<Method>().deallocate(d_methods, method_count);
 }
 
 void
@@ -73,9 +102,13 @@ Dispatcher::setModule(Module *module) {
     }
 
     if (d_module) {
+        auto method_count = method_size();
+
         std::for_each(
-            d_methods, d_methods + d_method_count,
-            [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().remove(method.getFunction()); });
+            d_methods, d_methods + method_count,
+            [this](auto &method) -> void {
+                d_module->getLLModule()->getFunctionList().remove(method.getFunction());
+            });
 
         if (d_module->getLLModule() && d_md) {
             auto dispatchers_md = d_module->getLLModule()->getNamedMetadata("llair.dispatcher");
@@ -94,8 +127,10 @@ Dispatcher::setModule(Module *module) {
     d_module = module;
 
     if (d_module) {
+        auto method_count = method_size();
+
         std::for_each(
-            d_methods, d_methods + d_method_count,
+            d_methods, d_methods + method_count,
             [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().push_back(method.getFunction()); });
 
         if (d_module->getLLModule() && d_md) {
@@ -111,6 +146,17 @@ Dispatcher::Create(const Interface *interface, Module *module) {
     return dispatcher;
 }
 
+Dispatcher *
+Dispatcher::Create(llvm::Metadata *md, Module *module) {
+    auto dispatcher = new Dispatcher(md, module);
+    return dispatcher;
+}
+
+std::size_t
+Dispatcher::method_size() const {
+    return d_interface ? d_interface->method_size() : 0;
+}
+
 const Dispatcher::Method *
 Dispatcher::findMethod(llvm::StringRef name) const {
     struct Compare {
@@ -123,7 +169,7 @@ Dispatcher::findMethod(llvm::StringRef name) const {
         }
     };
 
-    auto tmp = std::equal_range(d_methods, d_methods + d_method_count, name, Compare());
+    auto tmp = std::equal_range(d_methods, d_methods + method_size(), name, Compare());
 
     if (tmp.first == tmp.second) {
         return nullptr;
@@ -257,13 +303,13 @@ Dispatcher::dump() const {
     print(llvm::dbgs());
 }
 
-Dispatcher::Method::Method(const Interface *interface, const Interface::Method *interface_method, Module *module)
+Dispatcher::Method::Method(const Interface *interface, const Interface::Method *interface_method)
 : d_interface_method(interface_method) {
-    auto& ll_context = interface->getContext().getLLContext();
-
     d_function = llvm::Function::Create(
         d_interface_method->getType(), llvm::GlobalValue::ExternalLinkage, d_interface_method->getQualifiedName(),
-        module ? module->getLLModule() : nullptr);
+        nullptr);
+
+    auto& ll_context = d_function->getContext();
 
     auto builder = std::make_unique<llvm::IRBuilder<>>(ll_context);
 
@@ -281,9 +327,30 @@ Dispatcher::Method::Method(const Interface *interface, const Interface::Method *
     d_md.reset(llvm::ConstantAsMetadata::get(d_function));
 }
 
+Dispatcher::Method::Method(llvm::Metadata *md, const Interface::Method *interface_method)
+: d_interface_method(interface_method) {
+    d_md.reset(llvm::cast<llvm::ConstantAsMetadata>(md));
+
+    d_function = llvm::mdconst::extract<llvm::Function>(d_md.get());
+
+    d_switcher = llvm::cast<llvm::SwitchInst>(d_function->getEntryBlock().getTerminator());
+}
+
 Dispatcher::Method::~Method() {
     assert(d_function->getParent() == nullptr);
+
+    std::for_each(
+        d_function->use_begin(), d_function->use_end(),
+        [](auto& use) -> void {
+            use.set(nullptr);
+        });
+
     delete d_function;
+}
+
+llvm::Function *
+Dispatcher::Method::getFunction() const {
+    return llvm::mdconst::extract<llvm::Function>(d_md.get());
 }
 
 } // End namespace llair
