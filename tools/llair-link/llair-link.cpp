@@ -383,7 +383,7 @@ int
 main(int argc, char **argv) {
     llvm::cl::ParseCommandLineOptions(argc, argv, "llair-link\n");
 
-    llvm::ExitOnError exit_on_err("llosl-link: ");
+    llvm::ExitOnError exit_on_err("llair-link: ");
 
     auto llvm_context  = std::make_unique<llvm::LLVMContext>();
     auto llair_context = std::make_unique<llair::LLAIRContext>(*llvm_context);
