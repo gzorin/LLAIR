@@ -380,9 +380,9 @@ struct ClassSpec {
 
 Class *
 Module::getOrLoadClassFromABI(llvm::StringRef name) {
-    auto named = d_class_symbol_table.lookup(name);
-    if (named) {
-        return static_cast<Class *>(named);
+    auto klass = getClass(name);
+    if (klass) {
+        return klass;
     }
 
     ClassSpec class_spec;
@@ -427,13 +427,15 @@ Module::getOrLoadClassFromABI(llvm::StringRef name) {
     return Class::Create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
 }
 
-std::size_t
-Module::loadAllClassesFromABI() {
+std::vector<Class *>
+Module::getOrLoadAllClassesFromABI() {
+    std::vector<Class *> classes;
+
     llvm::StringMap<ClassSpec> class_specs;
 
     std::for_each(
         getLLModule()->begin(), getLLModule()->end(),
-        [this, &class_specs](auto &function) -> void {
+        [this, &classes, &class_specs](auto &function) -> void {
             if (!function.isStrongDefinitionForLinker()) {
                 return;
             }
@@ -445,7 +447,9 @@ Module::loadAllClassesFromABI() {
 
             auto class_name  = std::get<0>(*names);
 
-            if (getClass(class_name)) {
+            auto klass = getClass(class_name);
+            if (klass) {
+                classes.push_back(klass);
                 return;
             }
 
@@ -467,11 +471,9 @@ Module::loadAllClassesFromABI() {
             class_spec.method_functions.push_back(&function);
         });
 
-    std::size_t count = 0;
-
     std::for_each(
         class_specs.begin(), class_specs.end(),
-        [this, &count](const auto& entry) -> void {
+        [this, &classes](const auto& entry) -> void {
             auto name = entry.getKey();
             const auto& class_spec = entry.getValue();
 
@@ -484,11 +486,11 @@ Module::loadAllClassesFromABI() {
                 return;
             }
 
-            Class::Create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
-            ++count;
+            auto klass = Class::Create(class_spec.type, class_spec.method_names, class_spec.method_functions, name, this);
+            classes.push_back(klass);
         });
 
-    return count;
+    return classes;
 }
 
 std::size_t

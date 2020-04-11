@@ -540,13 +540,13 @@ main(int argc, char **argv) {
     std::for_each(
         input_modules.begin(), input_modules.end(),
         [&interface_scope](auto& input_module) -> void {
-            input_module->loadAllClassesFromABI();
+            auto classes = input_module->getOrLoadAllClassesFromABI();
 
             std::for_each(
-                input_module->class_begin(), input_module->class_end(),
-                [&interface_scope](const auto& klass) -> void {
-                    klass.print(llvm::errs());
-                    interface_scope->insertClass(&klass);
+                classes.begin(), classes.end(),
+                [&interface_scope](auto klass) -> void {
+                    klass->print(llvm::errs());
+                    interface_scope->insertClass(klass);
                 });
         });
 

@@ -133,7 +133,7 @@ public:
     Class *getClass(llvm::StringRef) const;
 
     Class *getOrLoadClassFromABI(llvm::StringRef);
-    std::size_t loadAllClassesFromABI();
+    std::vector<Class *> getOrLoadAllClassesFromABI();
 
     //
     const DispatcherListType& getDispatcherList() const { return d_dispatchers; }
