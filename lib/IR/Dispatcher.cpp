@@ -45,10 +45,13 @@ Dispatcher::Dispatcher(Interface *interface, Module *module)
 
     auto& ll_context = d_interface->getContext().getLLContext();
 
+    d_implementations_md.reset(llvm::MDTuple::get(ll_context, {}));
+
     d_md.reset(llvm::MDTuple::get(
         ll_context,
         { d_interface->metadata(),
-          llvm::MDTuple::get(ll_context, method_mds) } ));
+          llvm::MDTuple::get(ll_context, method_mds),
+          d_implementations_md.get() } ));
 
     if (module) {
         module->getDispatcherList().push_back(this);
@@ -68,8 +71,6 @@ Dispatcher::Dispatcher(llvm::Metadata *md, Module *module) {
 
     d_interface = Interface::get(interface_md);
 
-    d_interface->dump();
-
     auto method_count = method_size();
 
     auto methods_md = llvm::cast<llvm::MDTuple>(d_md->getOperand(1).get());
@@ -83,6 +84,19 @@ Dispatcher::Dispatcher(llvm::Metadata *md, Module *module) {
     for (auto n = method_count; n > 0; --n, ++p_method, ++it_interface_method, ++it_methods_md) {
         auto method = new (p_method) Method(it_methods_md->get(), it_interface_method);
     }
+
+    d_implementations_md.reset(llvm::cast<llvm::MDTuple>(d_md->getOperand(2).get()));
+
+    std::for_each(
+        d_implementations_md->op_begin(), d_implementations_md->op_end(),
+        [this](auto &operand) -> void {
+            auto implementation_md = llvm::cast<llvm::MDTuple>(operand.get());
+
+            auto kind = llvm::mdconst::extract<llvm::ConstantInt>(implementation_md->getOperand(0).get())->getZExtValue();
+            auto name = llvm::cast<llvm::MDString>(implementation_md->getOperand(1).get())->getString();
+
+            d_implementations.insert({ kind, { name } });
+        });
 }
 
 Dispatcher::~Dispatcher() {
@@ -140,6 +154,30 @@ Dispatcher::setModule(Module *module) {
     }
 }
 
+void
+Dispatcher::updateImplementationsMetadata() {
+    auto& ll_context = d_interface->getContext().getLLContext();
+
+    std::vector<llvm::Metadata *> mds;
+    mds.reserve(d_implementations.size());
+
+    std::transform(
+        d_implementations.begin(), d_implementations.end(),
+        std::back_inserter(mds),
+        [&ll_context](const auto& tmp) -> llvm::Metadata * {
+            auto [ kind, implementation ] = tmp;
+
+            return llvm::MDTuple::get(ll_context,
+                { llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+                        ll_context, llvm::APInt(32, kind, true))),
+                  llvm::MDString::get(ll_context, implementation.name) });
+        });
+
+    d_implementations_md.reset(llvm::MDTuple::get(ll_context, mds));
+
+    d_md->replaceOperandWith(2, d_implementations_md.get());
+}
+
 Dispatcher *
 Dispatcher::Create(Interface *interface, Module *module) {
     auto dispatcher = new Dispatcher(interface, module);
@@ -185,6 +223,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
     auto it_implementation = d_implementations.find(kind);
     assert(it_implementation == d_implementations.end());
     it_implementation = d_implementations.insert({ kind, { klass->getName().str() } }).first;
+    updateImplementationsMetadata();
 
     auto& ll_context = d_interface->getContext().getLLContext();
 

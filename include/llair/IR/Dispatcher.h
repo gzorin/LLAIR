@@ -87,6 +87,7 @@ private:
     Dispatcher(llvm::Metadata *, Module *);
 
     void setModule(Module *);
+    void updateImplementationsMetadata();
 
     Interface *d_interface = nullptr;
 
@@ -100,7 +101,7 @@ private:
 
     llvm::DenseMap<uint32_t, Implementation> d_implementations;
 
-    llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
+    llvm::TypedTrackingMDRef<llvm::MDTuple> d_md, d_implementations_md;
 
     friend struct module_ilist_traits<Dispatcher>;
     friend class Module;
