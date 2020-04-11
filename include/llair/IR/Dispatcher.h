@@ -38,7 +38,7 @@ public:
 
     private:
 
-        Method(const Interface *, const Interface::Method *);
+        Method(Interface *, const Interface::Method *);
         Method(llvm::Metadata *, const Interface::Method *);
 
         const Interface::Method *d_interface_method = nullptr;
@@ -50,11 +50,11 @@ public:
         friend class Dispatcher;
     };
 
-    static Dispatcher *Create(const Interface *, Module * = nullptr);
+    static Dispatcher *Create(Interface *, Module * = nullptr);
 
     ~Dispatcher();
 
-    const Interface *getInterface() const { return d_interface; }
+    Interface *getInterface() const { return d_interface; }
 
     using method_iterator       = Method *;
     using const_method_iterator = const Method *;
@@ -83,12 +83,12 @@ private:
 
     static Dispatcher *Create(llvm::Metadata *, Module * = nullptr);
 
-    Dispatcher(const Interface *, Module *);
+    Dispatcher(Interface *, Module *);
     Dispatcher(llvm::Metadata *, Module *);
 
     void setModule(Module *);
 
-    const Interface *d_interface = nullptr;
+    Interface *d_interface = nullptr;
 
     Method *d_methods      = nullptr;
 

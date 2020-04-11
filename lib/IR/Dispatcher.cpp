@@ -26,7 +26,7 @@ module_ilist_traits<llair::Dispatcher>::removeNodeFromList(llair::Dispatcher *di
     dispatcher->setModule(nullptr);
 }
 
-Dispatcher::Dispatcher(const Interface *interface, Module *module)
+Dispatcher::Dispatcher(Interface *interface, Module *module)
 : d_interface(interface) {
     auto method_count = method_size();
 
@@ -141,7 +141,7 @@ Dispatcher::setModule(Module *module) {
 }
 
 Dispatcher *
-Dispatcher::Create(const Interface *interface, Module *module) {
+Dispatcher::Create(Interface *interface, Module *module) {
     auto dispatcher = new Dispatcher(interface, module);
     return dispatcher;
 }
@@ -303,7 +303,7 @@ Dispatcher::dump() const {
     print(llvm::dbgs());
 }
 
-Dispatcher::Method::Method(const Interface *interface, const Interface::Method *interface_method)
+Dispatcher::Method::Method(Interface *interface, const Interface::Method *interface_method)
 : d_interface_method(interface_method) {
     d_function = llvm::Function::Create(
         d_interface_method->getType(), llvm::GlobalValue::ExternalLinkage, d_interface_method->getQualifiedName(),

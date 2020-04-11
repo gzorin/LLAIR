@@ -62,11 +62,9 @@ public:
     Module(std::unique_ptr<llvm::Module> &&module);
     ~Module();
 
-    const LLAIRContext &getContext() const { return d_context; }
-    LLAIRContext &      getContext() { return d_context; }
+    LLAIRContext &getContext() const { return d_context; }
 
-    const llvm::LLVMContext &getLLContext() const { return d_context.getLLContext(); }
-    llvm::LLVMContext &      getLLContext() { return d_context.getLLContext(); }
+    llvm::LLVMContext &getLLContext() const { return d_context.getLLContext(); }
 
     const llvm::Module *          getLLModule() const { return d_llmodule.get(); }
     llvm::Module *                getLLModule() { return d_llmodule.get(); }
