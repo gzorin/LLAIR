@@ -24,6 +24,7 @@ namespace llair {
 class Class;
 class Dispatcher;
 class EntryPoint;
+class Interface;
 class Module;
 
 template<typename T>
@@ -105,6 +106,9 @@ public:
     }
 
     EntryPoint *getEntryPoint(llvm::StringRef) const;
+
+    //
+    std::vector<Interface *> getAllInterfacesFromABI() const;
 
     //
     const ClassListType& getClassList() const { return d_classes; }

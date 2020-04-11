@@ -121,7 +121,7 @@ parseClassPathAndMethodName(const llvm::Function *function) {
 }
 
 llvm::Optional<llvm::StructType *>
-getSelfType(llvm::Function *function) {
+getSelfType(const llvm::Function *function) {
     auto first_param_type = function->getFunctionType()->getParamType(0);
 
     auto pointer_type = llvm::dyn_cast<llvm::PointerType>(first_param_type);
@@ -299,6 +299,65 @@ Module::getEntryPoint(llvm::StringRef name) const {
     return EntryPoint::Get(function);
 }
 
+struct InterfaceSpec {
+    llvm::StructType *type = nullptr;
+
+    std::vector<llvm::StringRef> method_names;
+    std::vector<llvm::StringRef> method_qualified_names;
+    std::vector<llvm::FunctionType *> method_types;
+};
+
+std::vector<Interface *>
+Module::getAllInterfacesFromABI() const {
+    llvm::StringMap<InterfaceSpec> interface_specs;
+
+    std::for_each(
+        getLLModule()->begin(), getLLModule()->end(),
+        [this, &interface_specs](auto &function) -> void {
+            if (!function.isDeclarationForLinker()) {
+                return;
+            }
+
+            auto names = parseClassPathAndMethodName(&function);
+            if (!names) {
+                return;
+            }
+
+            auto interface_name  = std::get<0>(*names);
+            auto method_name = std::get<2>(*names);
+
+            auto type = getSelfType(&function);
+            if (!type) {
+                return;
+            }
+
+            auto& interface_spec = interface_specs[interface_name];
+
+            if (!interface_spec.type) {
+                interface_spec.type = *type;
+            }
+            assert(interface_spec.type == *type);
+
+            interface_spec.method_names.push_back(method_name);
+            interface_spec.method_qualified_names.push_back(function.getName());
+            interface_spec.method_types.push_back(function.getFunctionType());
+        });
+
+    std::vector<Interface *> interfaces;
+    interfaces.reserve(interface_specs.size());
+
+    std::transform(
+        interface_specs.begin(), interface_specs.end(),
+        std::back_inserter(interfaces),
+        [this](const auto& entry) -> Interface * {
+            const auto& interface_spec = entry.getValue();
+
+            return Interface::get(getContext(), interface_spec.type, interface_spec.method_names, interface_spec.method_qualified_names, interface_spec.method_types);
+        });
+
+    return interfaces;
+}
+
 Class *
 Module::getClass(llvm::StringRef name) const {
     auto named = d_class_symbol_table.lookup(name);
@@ -432,57 +491,9 @@ Module::loadAllClassesFromABI() {
     return count;
 }
 
-struct InterfaceSpec {
-    llvm::StructType *type = nullptr;
-
-    std::vector<llvm::StringRef> method_names;
-    std::vector<llvm::StringRef> method_qualified_names;
-    std::vector<llvm::FunctionType *> method_types;
-};
-
 std::size_t
 Module::loadAllDispatchersFromABI() {
-    llvm::StringMap<InterfaceSpec> interface_specs;
-
-    std::for_each(
-        getLLModule()->begin(), getLLModule()->end(),
-        [this, &interface_specs](auto &function) -> void {
-            if (!function.isDeclarationForLinker()) {
-                return;
-            }
-
-            auto names = parseClassPathAndMethodName(&function);
-            if (!names) {
-                return;
-            }
-
-            auto interface_name  = std::get<0>(*names);
-            auto method_name = std::get<2>(*names);
-
-            auto type = getSelfType(&function);
-            if (!type) {
-                return;
-            }
-
-            auto& interface_spec = interface_specs[interface_name];
-
-            if (!interface_spec.type) {
-                interface_spec.type = *type;
-            }
-            assert(interface_spec.type == *type);
-
-            interface_spec.method_names.push_back(method_name);
-            interface_spec.method_qualified_names.push_back(function.getName());
-            interface_spec.method_types.push_back(function.getFunctionType());
-        });
-
-    std::for_each(
-        interface_specs.begin(), interface_specs.end(),
-        [this](const auto& entry) -> void {
-            const auto& interface_spec = entry.getValue();
-
-            auto interface = Interface::get(getContext(), interface_spec.type, interface_spec.method_names, interface_spec.method_qualified_names, interface_spec.method_types);
-        });
+    return 0;
 }
 
 namespace {
