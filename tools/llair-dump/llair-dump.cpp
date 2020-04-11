@@ -38,6 +38,13 @@ main(int argc, char **argv) {
     auto module = exit_on_err(
         llair::getBitcodeModule(llvm::MemoryBufferRef(*buffer), *llair_context));
 
+    auto interfaces = module->getAllInterfacesFromABI();
+    std::for_each(
+        interfaces.begin(), interfaces.end(),
+        [](auto interface) -> void {
+            interface->print(llvm::outs());
+        });
+
     module->print(llvm::outs());
 
     return 0;
