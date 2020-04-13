@@ -21,6 +21,14 @@ namespace {
 
 using NamedTypes = std::multimap<std::string, llvm::StructType *>;
 
+bool
+IsPrimeNamedType(llvm::StructType *struct_type) {
+    static llvm::Regex prime_named_type_regex(
+        "([a-zA-Z_][a-zA-Z0-9_:]*(\\.[a-zA-Z_:][a-zA-Z0-9_:]*)*)$");
+
+    return prime_named_type_regex.match(struct_type->getName());
+}
+
 NamedTypes
 GetNamedTypes(const llvm::Module *module) {
     static llvm::Regex named_type_regex(
@@ -85,23 +93,17 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
     llvm::DenseMap<llvm::Type *, llvm::Type *> type_map;
 
-    struct CompareTypes {
-        bool operator()(const NamedTypes::value_type &src_type,
-                        const NamedTypes::value_type &dst_type) const {
-            return src_type.first < dst_type.first;
-        }
-    };
+    std::for_each(
+        src_types.begin(), src_types.end(),
+        [&dst_types, &type_map](const auto &src) -> void {
+            auto it = dst_types.find(src.first);
+            if (it != dst_types.end()) {
+                type_map[src.second] = it->second;
+                return;
+            }
 
-    std::for_each(src_types.begin(), src_types.end(),
-                  [&dst_types, &type_map](const auto &src) -> void {
-                      auto it = dst_types.find(src.first);
-                      if (it != dst_types.end()) {
-                          type_map[src.second] = it->second;
-                          return;
-                      }
-
-                      dst_types.insert(src);
-                  });
+            dst_types.insert(src);
+        });
 
     // Collect global values in both 'src' and 'dst':
     std::vector<const llvm::GlobalValue *> src_global_values;
@@ -322,7 +324,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
         I->getAllMetadata(MDs);
         for (auto MD : MDs)
-            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs));
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs, &TMap));
 
         copyComdat(GV, &*I);
     }
@@ -383,7 +385,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             continue;
 
         for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
-            NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap));
+            NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap, RF_None, &TMap));
     }
 
     dst->syncMetadata();
