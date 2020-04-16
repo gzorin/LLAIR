@@ -493,9 +493,29 @@ Module::getOrLoadAllClassesFromABI() {
     return classes;
 }
 
-std::size_t
-Module::loadAllDispatchersFromABI() {
-    return 0;
+std::pair<Module::DispatcherSetType::const_iterator, Module::DispatcherSetType::const_iterator>
+Module::getDispatchers(Interface *interface) const {
+    auto it = d_dispatchers_by_interface.find(interface);
+
+    if (it != d_dispatchers_by_interface.end()) {
+        return std::make_pair(it->second.begin(), it->second.end());
+    }
+
+    return std::make_pair(DispatcherSetType::const_iterator(), DispatcherSetType::const_iterator());
+}
+
+std::pair<Module::DispatcherSetType::const_iterator, Module::DispatcherSetType::const_iterator>
+Module::getOrInsertDispatchers(Interface *interface) {
+    auto range = getDispatchers(interface);
+    if (range.first != range.second) {
+        return range;
+    }
+
+    auto dispatcher = Dispatcher::Create(interface, this);
+    auto it = d_dispatchers_by_interface.find(interface);
+    assert(it != d_dispatchers_by_interface.end());
+
+    return std::make_pair(it->second.begin(), it->second.end());
 }
 
 namespace {

@@ -55,6 +55,8 @@ public:
     using EntryPointListType = llvm::ilist<EntryPoint>;
     using ClassListType      = llvm::ilist<Class>;
     using DispatcherListType = llvm::ilist<Dispatcher>;
+    using DispatcherSetType  = llvm::DenseSet<Dispatcher *>;
+    using DispatcherMapType  = llvm::DenseMap<Interface *, DispatcherSetType>;
 
     static const Module *Get(const llvm::Module *);
     static Module *      Get(llvm::Module *);
@@ -152,7 +154,9 @@ public:
         return &Module::d_dispatchers;
     }
 
-    std::size_t loadAllDispatchersFromABI();
+    std::pair<DispatcherSetType::const_iterator, DispatcherSetType::const_iterator> getDispatchers(Interface *) const;
+
+    std::pair<DispatcherSetType::const_iterator, DispatcherSetType::const_iterator> getOrInsertDispatchers(Interface *);
 
     //
     void syncMetadata();
@@ -173,7 +177,12 @@ private:
     ClassListType d_classes;
     SymbolTable d_class_symbol_table;
 
+    friend class Class;
+
     DispatcherListType d_dispatchers;
+    DispatcherMapType d_dispatchers_by_interface;
+
+    friend class Dispatcher;
 };
 
 template<typename T>

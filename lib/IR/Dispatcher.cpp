@@ -124,6 +124,8 @@ Dispatcher::setModule(Module *module) {
                 d_module->getLLModule()->getFunctionList().remove(method.getFunction());
             });
 
+        d_module->d_dispatchers_by_interface[d_interface].erase(this);
+
         if (d_module->getLLModule() && d_md) {
             auto dispatchers_md = d_module->getLLModule()->getNamedMetadata("llair.dispatcher");
 
@@ -146,6 +148,8 @@ Dispatcher::setModule(Module *module) {
         std::for_each(
             d_methods, d_methods + method_count,
             [this](auto &method) -> void { d_module->getLLModule()->getFunctionList().push_back(method.getFunction()); });
+
+        d_module->d_dispatchers_by_interface[d_interface].insert(this);
 
         if (d_module->getLLModule() && d_md) {
             auto dispatchers_md = d_module->getLLModule()->getOrInsertNamedMetadata("llair.dispatcher");
