@@ -1,16 +1,21 @@
 #include <llair/IR/Module.h>
+#include <llair/IR/Class.h>
+#include <llair/IR/Dispatcher.h>
+#include <llair/IR/EntryPoint.h>
+#include <llair/IR/Interface.h>
 #include <llair/Linker/Linker.h>
+#include <llair/IR/Module.h>
 
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Regex.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <algorithm>
 #include <map>
-#include <numeric>
 #include <set>
 
 using namespace llvm;
@@ -143,19 +148,6 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         },
         CompareGlobalValues());
 
-    // Map global values declared in 'dst' to global values defined in 'src':
-    llvm::DenseMap<llvm::GlobalValue *, const llvm::GlobalValue *> dst_to_src_global_value_map;
-
-    for_each_intersection(dst_global_values.begin(), dst_global_values.end(),
-                          src_global_values.begin(), src_global_values.end(),
-                          [&dst_to_src_global_value_map](auto dst_value, auto src_value) -> void {
-                              if (dst_value->isDeclarationForLinker() &&
-                                  src_value->isStrongDefinitionForLinker()) {
-                                  dst_to_src_global_value_map[dst_value] = src_value;
-                              }
-                          },
-                          CompareGlobalValues());
-
     // Now clone 'src' into 'dst':
     class TypeMapper : public llvm::ValueMapTypeRemapper {
     public:
@@ -266,7 +258,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
         Function *NF = nullptr;
 
-        // If calling a member of 'function_map', rewrite the declaration:
+        // If calling a member of 'src_to_dst_global_value_map', rewrite the declaration:
         if (!NF) {
             auto it = src_to_dst_global_value_map.find(&I);
             if (it != src_to_dst_global_value_map.end()) {
@@ -289,9 +281,9 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             continue;
         }
 
-        Function *NF = nullptr;
+        Function *NF = New->getFunction(I.getName());
 
-        if (!NF) {
+        if (!NF || !NF->isDeclaration()) {
             NF = Function::Create(cast<FunctionType>(TMap.remapType(I.getValueType())),
                                   I.getLinkage(), I.getName(), New);
         }
@@ -352,17 +344,6 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         copyComdat(F, &I);
     }
 
-    // Replace functions declared in 'dst' with the definitions copied from 'src':
-    //
-    std::for_each(dst_to_src_global_value_map.begin(), dst_to_src_global_value_map.end(),
-                  [&VMap](auto tmp) -> void {
-                      auto [dst, src] = tmp;
-                      auto mapped_src = VMap[src];
-
-                      dst->replaceAllUsesWith(mapped_src);
-                      dst->eraseFromParent();
-                  });
-
     // And aliases
     for (llvm::Module::const_alias_iterator I = M->alias_begin(), E = M->alias_end(); I != E; ++I) {
         GlobalAlias *GA = cast<GlobalAlias>(VMap[&*I]);
@@ -389,6 +370,114 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     }
 
     dst->syncMetadata();
+}
+
+void
+finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::function<uint32_t(const Class*)> getKindForClass) {
+    auto dispatcher_module = std::make_unique<Module>("", module->getContext());
+
+    llvm::StringMap<llvm::DenseSet<Interface *>> interface_index;
+
+    std::for_each(
+        interfaces.begin(), interfaces.end(),
+        [&interface_index](auto interface) -> void {
+            std::for_each(
+                interface->method_begin(), interface->method_end(),
+                [&interface_index, interface](const auto& method) -> void {
+                    interface_index[method.getName()].insert(interface);
+                });
+        });
+
+    module->getOrLoadAllClassesFromABI();
+
+    llvm::DenseMap<llvm::StructType *, Interface *> interfaces_by_type;
+
+    std::for_each(
+        module->class_begin(), module->class_end(),
+        [getKindForClass, &dispatcher_module, &interface_index, &interfaces_by_type](const auto& klass) -> void {
+            // Find all interfaces that match `klass`:
+            llvm::DenseMap<Interface *, std::size_t> implemented_method_count;
+
+            std::for_each(
+                klass.method_begin(), klass.method_end(),
+                [&interface_index, &implemented_method_count](const auto& method) {
+                    auto it = interface_index.find(method.getName());
+                    if (it == interface_index.end()) {
+                        return;
+                    }
+
+                    std::for_each(
+                        it->second.begin(), it->second.end(),
+                        [&implemented_method_count](auto interface) {
+                            implemented_method_count[interface]++;
+                        });
+                });
+
+            std::for_each(
+                implemented_method_count.begin(), implemented_method_count.end(),
+                [getKindForClass, &dispatcher_module, &interfaces_by_type, &klass](auto tmp) {
+                    auto [ interface, implemented_method_count ] = tmp;
+                    if (implemented_method_count != interface->method_size()) {
+                        return;
+                    }
+
+                    auto r_dispatchers = dispatcher_module->getOrInsertDispatchers(interface);
+                    assert(r_dispatchers.first != r_dispatchers.second);
+
+                    auto dispatcher = *r_dispatchers.first;
+                    dispatcher->insertImplementation(getKindForClass(&klass), &klass);
+
+                    interfaces_by_type.insert({ interface->getType(), interface });
+                });
+        });
+
+    linkModules(module, dispatcher_module.get());
+
+    std::for_each(
+        module->entry_point_begin(), module->entry_point_end(),
+        [&interfaces_by_type](auto& entry_point) -> void {
+            std::for_each(
+                entry_point.arg_begin(), entry_point.arg_end(),
+                [&interfaces_by_type](auto& argument) -> void {
+                    if (!argument.AreDetailsBuffer() && !argument.AreDetailsIndirectBuffer()) {
+                        return;
+                    }
+
+                    auto argument_type = argument.getFunctionArgument()->getType();
+                    if (!argument_type->isPointerTy() || !argument_type->getPointerElementType()->isStructTy()) {
+                        return;
+                    }
+
+                    auto argument_struct_type = llvm::cast<StructType>(argument_type->getPointerElementType());
+
+                    auto it = interfaces_by_type.find(argument_struct_type);
+                    if (it == interfaces_by_type.end()) {
+                        if (argument.AreDetailsBuffer()) {
+                            auto details = *argument.GetDetailsAsBuffer();
+                            details.interface_type.reset();
+                            argument.InitDetailsAsBuffer(details);
+                        }
+                        else if (argument.AreDetailsIndirectBuffer()) {
+                            auto details = *argument.GetDetailsAsIndirectBuffer();
+                            details.interface_type.reset();
+                            argument.InitDetailsAsIndirectBuffer(details);
+                        }
+
+                        return;
+                    }
+
+                    if (argument.AreDetailsBuffer()) {
+                        auto details = *argument.GetDetailsAsBuffer();
+                        details.interface_type = it->second;
+                        argument.InitDetailsAsBuffer(details);
+                    }
+                    else if (argument.AreDetailsIndirectBuffer()) {
+                        auto details = *argument.GetDetailsAsIndirectBuffer();
+                        details.interface_type = it->second;
+                        argument.InitDetailsAsIndirectBuffer(details);
+                    }
+                });
+        });
 }
 
 } // End namespace llair

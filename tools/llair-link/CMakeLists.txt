@@ -1,7 +1,7 @@
 llvm_map_components_to_libnames(LLVM_LIBRARIES core support bitreader bitwriter transformutils)
 
 add_executable(llair-link
-  llair-link.cpp InterfaceScope.cpp)
+  llair-link.cpp)
 
 target_compile_features(llair-link PUBLIC cxx_std_17)
 

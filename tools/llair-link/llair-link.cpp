@@ -6,8 +6,6 @@
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
 
-#include "InterfaceScope.h"
-
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -67,27 +65,18 @@ main(int argc, char **argv) {
             linkModules(output.get(), input_module.get());
         });
 
-    auto interface_scope = std::make_unique<InterfaceScope>("dispatchers", *llair_context);
-
     auto interfaces = output->getAllInterfacesFromABI();
 
-    std::for_each(
-        interfaces.begin(), interfaces.end(),
-        [&interface_scope](auto interface) -> void {
-            interface_scope->insertInterface(interface);
-            interface->print(llvm::errs());
-        });
+    llvm::StringMap<uint32_t> class_kinds;
 
-    auto classes = output->getOrLoadAllClassesFromABI();
+    finalizeInterfaces(output.get(), interfaces, [&class_kinds](const Class *klass) -> uint32_t {
+        auto it = class_kinds.find(klass->getName());
+        if (it == class_kinds.end()) {
+            it = class_kinds.insert({ klass->getName(), class_kinds.size() }).first;
+        }
 
-    std::for_each(
-        classes.begin(), classes.end(),
-        [&interface_scope](auto klass) -> void {
-            interface_scope->insertClass(klass);
-            klass->print(llvm::errs());
-        });
-
-    linkModules(output.get(), interface_scope->module());
+        return it->second;
+    });
 
     // Write it out:
     std::error_code                       error_code;

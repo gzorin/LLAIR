@@ -379,6 +379,7 @@ EntryPoint::Argument::Argument(llvm::Argument *function_argument, llvm::MDTuple 
 
             if (string == "air.buffer" || string == "air.indirect_buffer") {
                 std::optional<unsigned int> buffer_size, type_size, type_align_size;
+                llvm::Optional<Interface *> interface_type;
 
                 for (auto it1 = d_md->op_begin(), it1_end = d_md->op_end(); it1 != it1_end;) {
                     string_md = llvm::dyn_cast<llvm::MDString>(it1++->get());
@@ -415,6 +416,14 @@ EntryPoint::Argument::Argument(llvm::Argument *function_argument, llvm::MDTuple 
 
                         type_align_size = type_align_size_md->getZExtValue();
                     }
+                    else if (keyword == "llair.interface_type") {
+                        auto interface_type_md = it1++->get();
+                        if (!interface_type_md) {
+                            continue;
+                        }
+
+                        interface_type = Interface::get(interface_type_md);
+                    }
                 }
 
                 if (!type_size || !type_align_size) {
@@ -423,11 +432,11 @@ EntryPoint::Argument::Argument(llvm::Argument *function_argument, llvm::MDTuple 
 
                 if (string == "air.buffer") {
                     d_details =
-                        Buffer({*location0, *location1, *access, *type_size, *type_align_size});
+                        Buffer({*location0, *location1, *access, *type_size, *type_align_size, interface_type});
                 }
                 else if (string == "air.indirect_buffer") {
                     d_details = IndirectBuffer(
-                        {*location0, *location1, *access, *type_size, *type_align_size});
+                        {*location0, *location1, *access, *type_size, *type_align_size, interface_type});
                 }
             }
             else if (string == "air.texture") {
@@ -565,43 +574,60 @@ EntryPoint::Argument::InitDetailsAsBuffer(const Buffer &buffer) {
 
     auto &ll_context = d_parent->getModule()->getLLContext();
 
-    d_md.reset(llvm::MDTuple::get(
-        ll_context,
-        {llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
-             ll_context, llvm::APInt(32, d_function_argument->getArgNo(), true))),
-         llvm::MDString::get(ll_context, "air.buffer"),
-         llvm::MDString::get(ll_context, "air.location_index"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location0, true))),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location1, true))),
-         buffer.access == Access::kReadOnly ? llvm::MDString::get(ll_context, "air.read")
-                                            : llvm::MDString::get(ll_context, "air.read_write"),
-         llvm::MDString::get(ll_context, "air.arg_type_size"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_size, true))),
-         llvm::MDString::get(ll_context, "air.arg_type_align_size"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_align_size, true))),
-         llvm::MDString::get(ll_context, "air.arg_type_name"),
-         llvm::MDString::get(ll_context, getTypeName()),
-         llvm::MDString::get(ll_context, "air.arg_name"),
-         llvm::MDString::get(ll_context, getName())}));
+    std::vector<llvm::Metadata *> mds = {
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+            ll_context, llvm::APInt(32, d_function_argument->getArgNo(), true))),
+        llvm::MDString::get(ll_context, "air.buffer"),
+        llvm::MDString::get(ll_context, "air.location_index"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location0, true))),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location1, true))),
+        buffer.access == Access::kReadOnly ? llvm::MDString::get(ll_context, "air.read")
+                                           : llvm::MDString::get(ll_context, "air.read_write"),
+        llvm::MDString::get(ll_context, "air.arg_type_size"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_size, true))),
+        llvm::MDString::get(ll_context, "air.arg_type_align_size"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_align_size, true))),
+        llvm::MDString::get(ll_context, "air.arg_type_name"),
+        llvm::MDString::get(ll_context, getTypeName()),
+        llvm::MDString::get(ll_context, "air.arg_name"),
+        llvm::MDString::get(ll_context, getName())
+    };
 
     d_type_name_md_index = 11;
     d_name_md_index      = 13;
+
+    if (buffer.interface_type && *buffer.interface_type != nullptr) {
+        d_interface_type_md_index = mds.size();
+
+        mds.insert(mds.end(), {
+            llvm::MDString::get(ll_context, "llair.interface_type"),
+            (*buffer.interface_type)->metadata()
+        });
+    }
+    else {
+        d_interface_type_md_index.reset();
+    }
+
+    d_md.reset(llvm::MDTuple::get(ll_context, mds));
 
     updateMetadataInEntryPoint();
 }
 
 void
-EntryPoint::Argument::InitDetailsAsBuffer(unsigned location0, unsigned location1, Access access) {
+EntryPoint::Argument::InitDetailsAsBuffer(unsigned location0, unsigned location1, Access access, llvm::Optional<Interface *> interface_type) {
     auto type = llvm::cast<llvm::PointerType>(d_function_argument->getType())->getElementType();
 
     auto &data_layout = d_parent->getModule()->getLLModule()->getDataLayout();
 
-    InitDetailsAsBuffer({location0, location1, access, (unsigned)data_layout.getTypeAllocSize(type),
-                         (unsigned)data_layout.getABITypeAlignment(type)});
+    InitDetailsAsBuffer({
+        location0, location1, access,
+        (unsigned)data_layout.getTypeAllocSize(type),
+        (unsigned)data_layout.getABITypeAlignment(type),
+        interface_type});
 }
 
 void
@@ -610,45 +636,60 @@ EntryPoint::Argument::InitDetailsAsIndirectBuffer(const IndirectBuffer &buffer) 
 
     auto &ll_context = d_parent->getModule()->getLLContext();
 
-    d_md.reset(llvm::MDTuple::get(
-        ll_context,
-        {llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
-             ll_context, llvm::APInt(32, d_function_argument->getArgNo(), true))),
-         llvm::MDString::get(ll_context, "air.indirect_buffer"),
-         llvm::MDString::get(ll_context, "air.location_index"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location0, true))),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location1, true))),
-         buffer.access == Access::kReadOnly ? llvm::MDString::get(ll_context, "air.read")
-                                            : llvm::MDString::get(ll_context, "air.read_write"),
-         llvm::MDString::get(ll_context, "air.arg_type_size"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_size, true))),
-         llvm::MDString::get(ll_context, "air.arg_type_align_size"),
-         llvm::ConstantAsMetadata::get(
-             llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_align_size, true))),
-         llvm::MDString::get(ll_context, "air.arg_type_name"),
-         llvm::MDString::get(ll_context, getTypeName()),
-         llvm::MDString::get(ll_context, "air.arg_name"),
-         llvm::MDString::get(ll_context, getName())}));
+    std::vector<llvm::Metadata *> mds = {
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+            ll_context, llvm::APInt(32, d_function_argument->getArgNo(), true))),
+        llvm::MDString::get(ll_context, "air.indirect_buffer"),
+        llvm::MDString::get(ll_context, "air.location_index"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location0, true))),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.location1, true))),
+        buffer.access == Access::kReadOnly ? llvm::MDString::get(ll_context, "air.read")
+                                        : llvm::MDString::get(ll_context, "air.read_write"),
+        llvm::MDString::get(ll_context, "air.arg_type_size"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_size, true))),
+        llvm::MDString::get(ll_context, "air.arg_type_align_size"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(ll_context, llvm::APInt(32, buffer.type_align_size, true))),
+        llvm::MDString::get(ll_context, "air.arg_type_name"),
+        llvm::MDString::get(ll_context, getTypeName()),
+        llvm::MDString::get(ll_context, "air.arg_name"),
+        llvm::MDString::get(ll_context, getName())
+    };
 
     d_type_name_md_index = 11;
     d_name_md_index      = 13;
+
+    if (buffer.interface_type && *buffer.interface_type != nullptr) {
+        d_interface_type_md_index = mds.size();
+
+        mds.insert(mds.end(), {
+            llvm::MDString::get(ll_context, "llair.interface_type"),
+            (*buffer.interface_type)->metadata()
+        });
+    }
+    else {
+        d_interface_type_md_index.reset();
+    }
+
+    d_md.reset(llvm::MDTuple::get(ll_context, mds));
 
     updateMetadataInEntryPoint();
 }
 
 void
-EntryPoint::Argument::InitDetailsAsIndirectBuffer(unsigned location0, unsigned location1,
-                                                  Access access) {
+EntryPoint::Argument::InitDetailsAsIndirectBuffer(unsigned location0, unsigned location1, Access access, llvm::Optional<Interface *> interface_type) {
     auto type = llvm::cast<llvm::PointerType>(d_function_argument->getType())->getElementType();
 
     auto &data_layout = d_parent->getModule()->getLLModule()->getDataLayout();
 
-    InitDetailsAsIndirectBuffer({location0, location1, access,
-                                 (unsigned)data_layout.getTypeAllocSize(type),
-                                 (unsigned)data_layout.getABITypeAlignment(type)});
+    InitDetailsAsIndirectBuffer({
+        location0, location1, access,
+        (unsigned)data_layout.getTypeAllocSize(type),
+        (unsigned)data_layout.getABITypeAlignment(type),
+        interface_type});
 }
 
 void

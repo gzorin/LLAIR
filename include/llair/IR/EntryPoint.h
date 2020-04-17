@@ -20,6 +20,7 @@ class Metadata;
 
 namespace llair {
 
+class Interface;
 class Module;
 
 template<typename T> struct module_ilist_traits;
@@ -84,10 +85,11 @@ public:
             unsigned int location0 = 0, location1 = 0;
             Access       access;
             unsigned int type_size = 0, type_align_size = 0;
+            llvm::Optional<Interface *> interface_type;
         };
 
         void          InitDetailsAsBuffer(const Buffer &buffer);
-        void          InitDetailsAsBuffer(unsigned int, unsigned int, Access);
+        void          InitDetailsAsBuffer(unsigned int, unsigned int, Access, llvm::Optional<Interface *>);
         bool          AreDetailsBuffer() const { return std::holds_alternative<Buffer>(d_details); }
         const Buffer *GetDetailsAsBuffer() const { return std::get_if<Buffer>(&d_details); }
         Buffer *      GetDetailsAsBuffer() { return std::get_if<Buffer>(&d_details); }
@@ -97,10 +99,11 @@ public:
             unsigned int location0 = 0, location1 = 0;
             Access       access;
             unsigned int type_size = 0, type_align_size = 0;
+            llvm::Optional<Interface *> interface_type;
         };
 
         void InitDetailsAsIndirectBuffer(const IndirectBuffer &buffer);
-        void InitDetailsAsIndirectBuffer(unsigned int, unsigned int, Access);
+        void InitDetailsAsIndirectBuffer(unsigned int, unsigned int, Access, llvm::Optional<Interface *>);
         bool AreDetailsIndirectBuffer() const {
             return std::holds_alternative<IndirectBuffer>(d_details);
         }
@@ -177,7 +180,7 @@ public:
         llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
         unsigned                                d_md_index = 0;
 
-        llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index;
+        llvm::Optional<unsigned> d_name_md_index, d_type_name_md_index, d_interface_type_md_index;
 
         std::variant<std::monostate, Buffer, IndirectBuffer, Texture, Position, VertexInput,
                      FragmentInput>
