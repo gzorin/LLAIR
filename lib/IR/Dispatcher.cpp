@@ -309,7 +309,12 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
 
                 auto call = builder->CreateCall(klass_function, args);
 
-                builder->CreateRet(call);
+                if (!call->getFunctionType()->getReturnType()->isVoidTy()) {
+                    builder->CreateRet(call);
+                }
+                else {
+                    builder->CreateRetVoid();
+                }
 
                 ++it_interface_method;
                 ++it_method;
