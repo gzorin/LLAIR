@@ -706,6 +706,12 @@ Module::syncMetadata() {
 void
 Module::print(llvm::raw_ostream& os) const {
     std::for_each(
+        entry_point_begin(), entry_point_end(),
+        [&os](const auto& entry_point) -> void {
+            entry_point.print(os);
+        });
+
+    std::for_each(
         class_begin(), class_end(),
         [&os](const auto& klass) -> void {
             klass.print(os);

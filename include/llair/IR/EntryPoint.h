@@ -16,6 +16,7 @@ class Argument;
 class Function;
 class MDNode;
 class Metadata;
+class raw_ostream;
 } // namespace llvm
 
 namespace llair {
@@ -201,6 +202,10 @@ public:
     llvm::MDNode *      metadata() { return d_md.get(); }
     const llvm::MDNode *metadata() const { return d_md.get(); }
 
+    virtual void print(llvm::raw_ostream&) const = 0;
+
+    void dump() const;
+
 protected:
     EntryPoint(EntryPointKind, llvm::Function *, Module *);
     EntryPoint(EntryPointKind, llvm::MDNode *, Module *);
@@ -296,6 +301,8 @@ public:
 
     std::size_t output_size() const;
 
+    void print(llvm::raw_ostream&) const override;
+
 private:
     friend class Module;
     friend class Output;
@@ -380,6 +387,8 @@ public:
 
     std::size_t output_size() const;
 
+    void print(llvm::raw_ostream&) const override;
+
 private:
     friend class Module;
     friend class Output;
@@ -400,6 +409,8 @@ private:
 class ComputeEntryPoint : public EntryPoint {
 public:
     static ComputeEntryPoint *Create(llvm::Function *, Module *);
+
+    void print(llvm::raw_ostream&) const override;
 
 private:
     ComputeEntryPoint(llvm::Function *, Module *);

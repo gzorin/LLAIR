@@ -6,6 +6,8 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/Support/Debug.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <numeric>
 #include <optional>
@@ -280,6 +282,11 @@ EntryPoint::getName() const {
 std::size_t
 EntryPoint::arg_size() const {
     return d_argument_count;
+}
+
+void
+EntryPoint::dump() const {
+    print(llvm::dbgs());
 }
 
 void
@@ -953,6 +960,12 @@ VertexEntryPoint::output_size() const {
 }
 
 void
+VertexEntryPoint::print(llvm::raw_ostream& os) const {
+    os << "vertex program ";
+    os << getName() << "\n";
+}
+
+void
 VertexEntryPoint::updateOutputMetadata(Output *output) {
     d_outputs_md->replaceOperandWith(output->d_md_index, output->d_md.get());
     d_outputs_md->resolve();
@@ -1293,6 +1306,12 @@ FragmentEntryPoint::output_size() const {
 }
 
 void
+FragmentEntryPoint::print(llvm::raw_ostream& os) const {
+    os << "fragment program ";
+    os << getName() << "\n";
+}
+
+void
 FragmentEntryPoint::updateOutputMetadata(Output *output) {
     d_outputs_md->replaceOperandWith(output->d_md_index, output->d_md.get());
 }
@@ -1513,6 +1532,12 @@ FragmentEntryPoint::Output::setTypeName(llvm::StringRef type_name) {
 
     d_md->replaceOperandWith(*d_type_name_md_index,
                              llvm::MDString::get(d_parent->getModule()->getLLContext(), type_name));
+}
+
+void
+ComputeEntryPoint::print(llvm::raw_ostream& os) const {
+    os << "compute program ";
+    os << getName() << "\n";
 }
 
 } // namespace llair
