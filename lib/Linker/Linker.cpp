@@ -432,52 +432,6 @@ finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::
         });
 
     linkModules(module, dispatcher_module.get());
-
-    std::for_each(
-        module->entry_point_begin(), module->entry_point_end(),
-        [&interfaces_by_type](auto& entry_point) -> void {
-            std::for_each(
-                entry_point.arg_begin(), entry_point.arg_end(),
-                [&interfaces_by_type](auto& argument) -> void {
-                    if (!argument.AreDetailsBuffer() && !argument.AreDetailsIndirectBuffer()) {
-                        return;
-                    }
-
-                    auto argument_type = argument.getFunctionArgument()->getType();
-                    if (!argument_type->isPointerTy() || !argument_type->getPointerElementType()->isStructTy()) {
-                        return;
-                    }
-
-                    auto argument_struct_type = llvm::cast<StructType>(argument_type->getPointerElementType());
-
-                    auto it = interfaces_by_type.find(argument_struct_type);
-                    if (it == interfaces_by_type.end()) {
-                        if (argument.AreDetailsBuffer()) {
-                            auto details = *argument.GetDetailsAsBuffer();
-                            details.interface_type.reset();
-                            argument.InitDetailsAsBuffer(details);
-                        }
-                        else if (argument.AreDetailsIndirectBuffer()) {
-                            auto details = *argument.GetDetailsAsIndirectBuffer();
-                            details.interface_type.reset();
-                            argument.InitDetailsAsIndirectBuffer(details);
-                        }
-
-                        return;
-                    }
-
-                    if (argument.AreDetailsBuffer()) {
-                        auto details = *argument.GetDetailsAsBuffer();
-                        details.interface_type = it->second;
-                        argument.InitDetailsAsBuffer(details);
-                    }
-                    else if (argument.AreDetailsIndirectBuffer()) {
-                        auto details = *argument.GetDetailsAsIndirectBuffer();
-                        details.interface_type = it->second;
-                        argument.InitDetailsAsIndirectBuffer(details);
-                    }
-                });
-        });
 }
 
 } // End namespace llair

@@ -12,6 +12,8 @@ llvm_map_components_to_libnames(
   support core bitreader bitwriter
 )
 
+configure_file(config.h.in config.h)
+
 #
 macro(add_metal_source srclist src)
   get_filename_component(we ${src} NAME_WE)

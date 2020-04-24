@@ -15,6 +15,9 @@ execute_process(
   OUTPUT_VARIABLE METAL
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 
+get_filename_component(
+  LLAIR_TOOLS_PATH "${METAL}" DIRECTORY)
+
 install(
   EXPORT LLAIRTargets
   DESTINATION lib/cmake/llair)
