@@ -17,3 +17,7 @@ target_include_directories(llair-dump
 target_link_libraries(llair-dump
   LLAIR LLAIRBitcode LLAIRLinker LLAIRDemangleLib
   ${LLVM_LIBRARIES})
+
+install(
+  TARGETS llair-dump
+  DESTINATION bin)
