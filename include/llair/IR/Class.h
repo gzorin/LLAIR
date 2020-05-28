@@ -5,6 +5,7 @@
 #include <llair/IR/Named.h>
 
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/ilist_node.h>
 #include <llvm/IR/TrackingMDRef.h>
@@ -48,6 +49,11 @@ public:
     ~Class();
 
     llvm::StructType *getType() const { return d_type; }
+    llvm::Optional<std::size_t> getSize() const { return d_size; }
+
+    llvm::StructType *getTypeWithKind() const { return d_type_with_kind; }
+    llvm::Optional<std::size_t> getSizeWithKind() const { return d_size_with_kind; }
+    llvm::Optional<std::size_t> getOffsetPastKind() const { return d_offset_past_kind; }
 
     using method_iterator       = Method *;
     using const_method_iterator = const Method *;
@@ -79,16 +85,19 @@ private:
     Class(llvm::Metadata *, Module *);
 
     void setModule(Module *);
+    void updateLayout();
 
     // Named overrides:
     LLAIRContext& getContext() const override;
 
-    llvm::StructType *d_type = nullptr;
+    llvm::StructType *d_type = nullptr, *d_type_with_kind = nullptr;
 
     std::size_t d_method_count = 0;
     Method     *d_methods      = nullptr;
 
     Module *d_module = nullptr;
+
+    llvm::Optional<std::size_t> d_size, d_size_with_kind, d_offset_past_kind;
 
     llvm::TypedTrackingMDRef<llvm::MDTuple> d_md;
 

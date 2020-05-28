@@ -25,6 +25,32 @@ class Module;
 void linkModules(Module *, const Module *);
 void finalizeInterfaces(Module *, llvm::ArrayRef<Interface *>, std::function<uint32_t(const Class*)>);
 
+class Linker {
+public:
+
+    class Delegate {
+        virtual ~Delegate();
+
+        virtual uint32_t getKindForClass(const Class *) = 0;
+    };
+
+    Linker(Delegate&, llvm::StringRef, LLAIRContext &);
+
+    void addInterface(Interface *);
+
+    void linkModule(const Module *);
+
+    std::unique_ptr<Module> releaseModule();
+
+private:
+
+    Delegate& d_delegate;
+
+    std::unique_ptr<Module> d_module;
+
+    llvm::StringMap<llvm::DenseSet<Interface *>> d_interface_index;
+};
+
 } // End namespace llair
 
 #endif

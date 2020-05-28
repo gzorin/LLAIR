@@ -434,4 +434,31 @@ finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::
     linkModules(module, dispatcher_module.get());
 }
 
+Linker::Linker(Delegate& delegate, llvm::StringRef name, LLAIRContext& context)
+: d_delegate(delegate)
+, d_module(std::make_unique<Module>(name, context)) {
+}
+
+void
+Linker::addInterface(Interface *interface) {
+    std::for_each(
+        interface->method_begin(), interface->method_end(),
+        [this, interface](const auto& method) -> void {
+            d_interface_index[method.getName()].insert(interface);
+        });
+}
+
+void
+Linker::linkModule(const Module *module) {
+
+}
+
+std::unique_ptr<Module>
+Linker::releaseModule() {
+    return std::move(d_module);
+}
+
+Linker::Delegate::~Delegate() {
+}
+
 } // End namespace llair

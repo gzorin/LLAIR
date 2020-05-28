@@ -231,11 +231,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
 
     auto& ll_context = d_interface->getContext().getLLContext();
 
-    auto type = llvm::StructType::get(
-        ll_context, std::vector<llvm::Type *>{
-            llvm::Type::getInt32Ty(ll_context),
-            klass->getType()
-        });
+    auto type_with_kind = klass->getTypeWithKind();
 
     auto it_interface_method = d_interface->method_begin();
     auto it_method = d_methods;
@@ -295,7 +291,7 @@ Dispatcher::insertImplementation(uint32_t kind, const Class *klass) {
                     nullptr,
                     builder->CreatePointerCast(
                         it_method->d_function->arg_begin(),
-                        llvm::PointerType::get(type, 1)), 1);
+                        llvm::PointerType::get(type_with_kind, 1)), 1);
 
                 *it_args++ = that;
 

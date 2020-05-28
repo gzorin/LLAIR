@@ -5,6 +5,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -28,6 +29,14 @@ module_ilist_traits<llair::Class>::removeNodeFromList(llair::Class *klass) {
 Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm::ArrayRef<llvm::Function *> functions, llvm::StringRef name, Module *module)
     : d_type(type)
     , d_method_count(std::min(names.size(), functions.size())) {
+    auto& ll_context = d_type->getContext();
+
+    d_type_with_kind = llvm::StructType::get(
+        ll_context, std::vector<llvm::Type *>{
+            llvm::Type::getInt32Ty(ll_context),
+            d_type
+        });
+
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
     auto p_method = d_methods;
@@ -47,8 +56,6 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     });
 
     setName(name);
-
-    auto& ll_context = d_type->getContext();
 
     d_md.reset(llvm::MDTuple::get(
         ll_context,
@@ -75,6 +82,16 @@ Class::Class(llvm::Metadata *md, Module *module) {
         llvm::mdconst::extract<llvm::ConstantPointerNull>(d_md->getOperand(1).get())->
             getType()->
                 getElementType());
+
+    auto& ll_context = d_type->getContext();
+
+    d_type_with_kind = llvm::StructType::get(
+        ll_context, std::vector<llvm::Type *>{
+            llvm::Type::getInt32Ty(ll_context),
+            d_type
+        });
+
+    updateLayout();
 
     auto methods_md = llvm::cast<llvm::MDTuple>(d_md->getOperand(2).get());
 
@@ -109,6 +126,10 @@ Class::setModule(Module *module) {
     if (d_module) {
         setSymbolTable(nullptr);
 
+        d_size.reset();
+        d_size_with_kind.reset();
+        d_offset_past_kind.reset();
+
         if (d_module->getLLModule() && d_md) {
             auto class_md = d_module->getLLModule()->getNamedMetadata("llair.class");
 
@@ -128,10 +149,28 @@ Class::setModule(Module *module) {
     if (d_module) {
         setSymbolTable(&d_module->getClassSymbolTable());
 
+        updateLayout();
+
         if (d_module->getLLModule() && d_md) {
             auto dispatchers_md = d_module->getLLModule()->getOrInsertNamedMetadata("llair.class");
             dispatchers_md->addOperand(d_md.get());
         }
+    }
+}
+
+void
+Class::updateLayout() {
+    if (d_module->getLLModule() && d_type) {
+        auto layout = d_module->getLLModule()->getDataLayout().getStructLayout(d_type);
+        assert(layout);
+        d_size = layout->getSizeInBytes();
+    }
+
+    if (d_module->getLLModule() && d_type_with_kind) {
+        auto layout = d_module->getLLModule()->getDataLayout().getStructLayout(d_type_with_kind);
+        assert(layout);
+        d_size_with_kind = layout->getSizeInBytes();
+        d_offset_past_kind = layout->getElementOffset(1);
     }
 }
 
