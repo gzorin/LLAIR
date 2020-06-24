@@ -30,7 +30,7 @@ add_subdirectory(lib/Linker)
 add_subdirectory(lib/Tools)
 add_subdirectory(tools/llair-dump)
 add_subdirectory(tools/llair-link)
-add_subdirectory(examples)
+add_subdirectory(examples/command-line)
 
 include(CMakePackageConfigHelpers)
 
