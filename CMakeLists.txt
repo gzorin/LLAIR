@@ -1,19 +1,14 @@
 cmake_minimum_required(VERSION 3.14)
 project(LLAIR)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
-find_program(XXD xxd)
-
-find_program(XCRUN xcrun)
-
-execute_process(
-  COMMAND ${XCRUN} --sdk macosx --find metal
-  OUTPUT_VARIABLE METAL
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+include(metal)
 
 get_filename_component(
   LLAIR_TOOLS_PATH "${METAL}" DIRECTORY)
@@ -31,6 +26,7 @@ add_subdirectory(lib/Tools)
 add_subdirectory(tools/llair-dump)
 add_subdirectory(tools/llair-link)
 add_subdirectory(examples/command-line)
+add_subdirectory(examples/interactive)
 
 include(CMakePackageConfigHelpers)
 

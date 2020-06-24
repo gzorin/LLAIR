@@ -1,0 +1,11 @@
+//-*-C++-*-
+#ifndef llair_config_H
+#define llair_config_H
+
+namespace {
+
+const char *LLAIR_TOOLS_PATH = "${LLAIR_TOOLS_PATH}";
+
+}
+
+#endif

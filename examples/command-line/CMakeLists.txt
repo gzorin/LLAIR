@@ -14,59 +14,6 @@ llvm_map_components_to_libnames(
 
 configure_file(config.h.in config.h)
 
-#
-macro(add_metal_source srclist src)
-  get_filename_component(we ${src} NAME_WE)
-  set(dot_h "${we}_metal.h")
-
-  set(${srclist} ${${srclist}} ${CMAKE_CURRENT_BINARY_DIR}/${dot_h})
-  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${dot_h} PROPERTIES GENERATED 1)
-
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
-    COMMAND ${XXD} -i ${src} > ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
-    MAIN_DEPENDENCY ${src}
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
-
-  message("Generated ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}")
-endmacro()
-
-macro(add_metal_sources srclist)
-  foreach(arg IN ITEMS ${ARGN})
-    add_metal_source(${srclist} ${arg})
-  endforeach()
-endmacro()
-
-#
-macro(add_compiled_metal_source srclist src)
-  get_filename_component(we ${src} NAME_WE)
-  set(dot_bc "${we}_metal.bc")
-  set(dot_h "${we}_metal_bc.h")
-
-  set(${srclist} ${${srclist}} ${CMAKE_CURRENT_BINARY_DIR}/${dot_h})
-  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${dot_h} PROPERTIES GENERATED 1)
-
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}
-    COMMAND ${METAL} -x metal -o ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc} ${src}
-    MAIN_DEPENDENCY ${src}
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
-
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
-    COMMAND ${XXD} -i ${dot_bc} > ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}
-    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-  message("Generated ${CMAKE_CURRENT_BINARY_DIR}/${dot_h}")
-endmacro()
-
-macro(add_compiled_metal_sources srclist)
-  foreach(arg IN ITEMS ${ARGN})
-    add_compiled_metal_source(${srclist} ${arg})
-  endforeach()
-endmacro()
-
 # llair-test
 add_executable(
   llair-test
