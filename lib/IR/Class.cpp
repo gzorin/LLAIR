@@ -43,17 +43,25 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
     auto it_name = names.begin();
     auto it_function = functions.begin();
 
+    for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_name, ++it_function) {
+        new (p_method) Method(*it_name, *it_function);
+    }
+
+    std::sort(
+        d_methods, d_methods + d_method_count,
+        [](const auto &lhs, const auto &rhs) -> auto {
+            return lhs.getName() < rhs.getName();
+        });
+
     std::vector<llvm::Metadata *> method_mds;
     method_mds.reserve(d_method_count);
 
-    for (auto n = d_method_count; n > 0; --n, ++p_method, ++it_name, ++it_function) {
-        auto method = new (p_method) Method(*it_name, *it_function);
-        method_mds.push_back(method->d_md.get());
-    }
-
-    std::sort(d_methods, d_methods + d_method_count, [](const auto &lhs, const auto &rhs) -> auto {
-        return lhs.getName() < rhs.getName();
-    });
+    std::transform(
+        d_methods, d_methods + d_method_count,
+        std::back_inserter(method_mds),
+        [](const auto& method) -> auto {
+            return method.d_md.get();
+        });
 
     setName(name);
 
