@@ -628,7 +628,7 @@ void
 EntryPoint::Argument::InitDetailsAsBuffer(unsigned location0, unsigned location1, Access access, llvm::Optional<Interface *> interface_type) {
     auto type = llvm::cast<llvm::PointerType>(d_function_argument->getType())->getElementType();
 
-    auto &data_layout = d_parent->getModule()->getLLModule()->getDataLayout();
+    const auto& data_layout = LLAIRContext::Get(&type->getContext())->getDataLayout();
 
     InitDetailsAsBuffer({
         location0, location1, access,
@@ -690,7 +690,7 @@ void
 EntryPoint::Argument::InitDetailsAsIndirectBuffer(unsigned location0, unsigned location1, Access access, llvm::Optional<Interface *> interface_type) {
     auto type = llvm::cast<llvm::PointerType>(d_function_argument->getType())->getElementType();
 
-    auto &data_layout = d_parent->getModule()->getLLModule()->getDataLayout();
+    const auto& data_layout = LLAIRContext::Get(&type->getContext())->getDataLayout();
 
     InitDetailsAsIndirectBuffer({
         location0, location1, access,

@@ -11,6 +11,7 @@
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/DataLayout.h>
 
 #include <numeric>
 
@@ -149,6 +150,9 @@ public:
     const llvm::LLVMContext& getLLContext() const { return d_llcontext; }
     llvm::LLVMContext&       getLLContext()       { return d_llcontext; }
 
+    const llvm::DataLayout&  getDataLayout() const { return d_data_layout; }
+    llvm::StringRef          getTargetTriple() const { return d_target_triple; }
+
     //
     using NameMap = llvm::DenseMap<const Named *, SymbolTableEntry *>;
 
@@ -175,6 +179,8 @@ public:
 
 private:
     llvm::LLVMContext& d_llcontext;
+    llvm::DataLayout   d_data_layout;
+    std::string        d_target_triple;
 
     NameMap            d_names;
     ModuleMapType      d_modules;

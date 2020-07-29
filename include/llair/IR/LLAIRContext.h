@@ -2,9 +2,12 @@
 #ifndef LLAIR_LLAIRCONTEXT_H
 #define LLAIR_LLAIRCONTEXT_H
 
+#include <llvm/ADT/StringRef.h>
+
 #include <memory>
 
 namespace llvm {
+class DataLayout;
 class LLVMContext;
 }
 
@@ -22,6 +25,9 @@ public:
 
     const llvm::LLVMContext &getLLContext() const;
     llvm::LLVMContext &      getLLContext();
+
+    const llvm::DataLayout&  getDataLayout() const;
+    llvm::StringRef          getTargetTriple() const;
 
 private:
     std::unique_ptr<LLAIRContextImpl> d_impl;

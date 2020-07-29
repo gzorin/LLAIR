@@ -37,6 +37,8 @@ Class::Class(llvm::StructType *type, llvm::ArrayRef<llvm::StringRef> names, llvm
             d_type
         });
 
+    updateLayout();
+
     d_methods = std::allocator<Method>().allocate(d_method_count);
 
     auto p_method = d_methods;
@@ -134,10 +136,6 @@ Class::setModule(Module *module) {
     if (d_module) {
         setSymbolTable(nullptr);
 
-        d_size.reset();
-        d_size_with_kind.reset();
-        d_offset_past_kind.reset();
-
         if (d_module->getLLModule() && d_md) {
             auto class_md = d_module->getLLModule()->getNamedMetadata("llair.class");
 
@@ -157,8 +155,6 @@ Class::setModule(Module *module) {
     if (d_module) {
         setSymbolTable(&d_module->getClassSymbolTable());
 
-        updateLayout();
-
         if (d_module->getLLModule() && d_md) {
             auto dispatchers_md = d_module->getLLModule()->getOrInsertNamedMetadata("llair.class");
             dispatchers_md->addOperand(d_md.get());
@@ -168,18 +164,16 @@ Class::setModule(Module *module) {
 
 void
 Class::updateLayout() {
-    if (d_module->getLLModule() && d_type) {
-        auto layout = d_module->getLLModule()->getDataLayout().getStructLayout(d_type);
-        assert(layout);
-        d_size = layout->getSizeInBytes();
-    }
+    const auto& data_layout = getContext().getDataLayout();
 
-    if (d_module->getLLModule() && d_type_with_kind) {
-        auto layout = d_module->getLLModule()->getDataLayout().getStructLayout(d_type_with_kind);
-        assert(layout);
-        d_size_with_kind = layout->getSizeInBytes();
-        d_offset_past_kind = layout->getElementOffset(1);
-    }
+  { auto layout = data_layout.getStructLayout(d_type);
+    assert(layout);
+    d_size = layout->getSizeInBytes(); }
+
+  { auto layout = data_layout.getStructLayout(d_type_with_kind);
+    assert(layout);
+    d_size_with_kind = layout->getSizeInBytes();
+    d_offset_past_kind = layout->getElementOffset(1); }
 }
 
 Class *
