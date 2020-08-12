@@ -922,10 +922,6 @@ VertexEntryPoint::VertexEntryPoint(llvm::Function *function, unsigned output_cou
 
     d_md.reset(llvm::MDTuple::get(ll_context,
                                   {d_function_md.get(), d_outputs_md.get(), d_arguments_md.get()}));
-
-    if (module) {
-        module->getEntryPointList().push_back(this);
-    }
 }
 
 VertexEntryPoint::VertexEntryPoint(llvm::MDNode *md, Module *module)
@@ -1255,10 +1251,6 @@ FragmentEntryPoint::FragmentEntryPoint(llvm::Function *function, bool early_frag
         d_md.reset(llvm::MDTuple::get(
             ll_context, {d_function_md.get(), d_outputs_md.get(), d_arguments_md.get()}));
     }
-
-    if (module) {
-        module->getEntryPointList().push_back(this);
-    }
 }
 
 FragmentEntryPoint::FragmentEntryPoint(llvm::MDNode *md, Module *module)
@@ -1546,10 +1538,6 @@ ComputeEntryPoint::ComputeEntryPoint(llvm::Function *function, Module *module)
 
     d_md.reset(llvm::MDTuple::get(ll_context,
                                   {d_function_md.get(), llvm::MDTuple::get(ll_context, {}), d_arguments_md.get()}));
-
-    if (module) {
-        module->getEntryPointList().push_back(this);
-    }
 }
 
 ComputeEntryPoint::ComputeEntryPoint(llvm::MDNode *md, Module *module)
