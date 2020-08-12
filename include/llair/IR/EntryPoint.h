@@ -413,7 +413,10 @@ public:
     void print(llvm::raw_ostream&) const override;
 
 private:
+    friend class Module;
+
     ComputeEntryPoint(llvm::Function *, Module *);
+    ComputeEntryPoint(llvm::MDNode *, Module *);
 };
 
 } // namespace llair

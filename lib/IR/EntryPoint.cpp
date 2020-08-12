@@ -1534,6 +1534,28 @@ FragmentEntryPoint::Output::setTypeName(llvm::StringRef type_name) {
                              llvm::MDString::get(d_parent->getModule()->getLLContext(), type_name));
 }
 
+// ComputeEntryPoint
+ComputeEntryPoint *
+ComputeEntryPoint::Create(llvm::Function *function, Module *module) {
+    return new ComputeEntryPoint(function, module);
+}
+
+ComputeEntryPoint::ComputeEntryPoint(llvm::Function *function, Module *module)
+    : EntryPoint(EntryPoint::Compute, function, module) {
+    auto &ll_context = d_module->getLLContext();
+
+    d_md.reset(llvm::MDTuple::get(ll_context,
+                                  {d_function_md.get(), llvm::MDTuple::get(ll_context, {}), d_arguments_md.get()}));
+
+    if (module) {
+        module->getEntryPointList().push_back(this);
+    }
+}
+
+ComputeEntryPoint::ComputeEntryPoint(llvm::MDNode *md, Module *module)
+    : EntryPoint(EntryPoint::Compute, md, module) {
+}
+
 void
 ComputeEntryPoint::print(llvm::raw_ostream& os) const {
     os << "compute program ";
