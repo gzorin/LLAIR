@@ -388,8 +388,6 @@ finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::
                 });
         });
 
-    module->getOrLoadAllClassesFromABI();
-
     llvm::DenseMap<llvm::StructType *, Interface *> interfaces_by_type;
 
     std::for_each(
