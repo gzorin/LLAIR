@@ -113,7 +113,7 @@ EntryPoint::EntryPoint(EntryPoint::EntryPointKind kind, llvm::Function *function
                        return argument.d_md.get();
                    });
 
-    auto &ll_context = d_module->getLLContext();
+    auto &ll_context = function->getContext();
 
     d_arguments_md.reset(llvm::MDTuple::get(ll_context, mds));
 }
@@ -916,7 +916,7 @@ VertexEntryPoint::VertexEntryPoint(llvm::Function *function, unsigned output_cou
                        return output.d_md.get();
                    });
 
-    auto &ll_context = d_module->getLLContext();
+    auto &ll_context = function->getContext();
 
     d_outputs_md.reset(llvm::MDTuple::get(ll_context, mds));
 
@@ -1238,7 +1238,7 @@ FragmentEntryPoint::FragmentEntryPoint(llvm::Function *function, bool early_frag
                        return output.d_md.get();
                    });
 
-    auto &ll_context = d_module->getLLContext();
+    auto &ll_context = function->getContext();
 
     d_outputs_md.reset(llvm::MDTuple::get(ll_context, mds));
 
@@ -1534,7 +1534,7 @@ ComputeEntryPoint::Create(llvm::Function *function, Module *module) {
 
 ComputeEntryPoint::ComputeEntryPoint(llvm::Function *function, Module *module)
     : EntryPoint(EntryPoint::Compute, function, module) {
-    auto &ll_context = d_module->getLLContext();
+    auto &ll_context = function->getContext();
 
     d_md.reset(llvm::MDTuple::get(ll_context,
                                   {d_function_md.get(), llvm::MDTuple::get(ll_context, {}), d_arguments_md.get()}));
