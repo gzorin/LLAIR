@@ -23,7 +23,7 @@
 #include <memory>
 
 namespace {
-#include "llair-draw_metal_bc.h"
+#include "llair-triangle_metal_bc.h"
 }
 
 struct Context {
@@ -69,7 +69,7 @@ llair_example_init(int argc, const char * argv[], id<MTLDevice> device, MTKView 
     s_context->d_device = device;
     s_context->d_command_queue = [s_context->d_device newCommandQueue];
 
-    auto module = CreateModule(&llair_draw_metal_bc[0], llair_draw_metal_bc_len, "llair-draw", *s_context->llair_context);
+    auto module = CreateModule(&llair_triangle_metal_bc[0], llair_triangle_metal_bc_len, "llair-triangle", *s_context->llair_context);
 
     auto library = llair::makeLibrary(*module);
     if (!library) {
