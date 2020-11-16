@@ -10,8 +10,8 @@
 // file does not yet support:
 //   - C++ modules TS
 
-#include "llvm/Demangle/ItaniumDemangle.h"
-#include "llvm/Demangle/Demangle.h"
+#include "llair/Demangle/ItaniumDemangle.h"
+#include "llair/Demangle/Demangle.h"
 
 #include <cassert>
 #include <cctype>
@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-using namespace llvm;
-using namespace llvm::itanium_demangle;
+using namespace llair;
+using namespace llair::itanium_demangle;
 
 constexpr const char *itanium_demangle::FloatData<float>::spec;
 constexpr const char *itanium_demangle::FloatData<double>::spec;

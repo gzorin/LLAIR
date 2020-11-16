@@ -10,23 +10,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_SUPPORT_MICROSOFTDEMANGLENODES_H
-#define LLVM_SUPPORT_MICROSOFTDEMANGLENODES_H
+#ifndef LLAIR_SUPPORT_MICROSOFTDEMANGLENODES_H
+#define LLAIR_SUPPORT_MICROSOFTDEMANGLENODES_H
 
-#include "llvm/Demangle/DemangleConfig.h"
-#include "llvm/Demangle/StringView.h"
+#include "llair/Demangle/DemangleConfig.h"
+#include "llair/Demangle/StringView.h"
 #include <array>
 
-namespace llvm {
+namespace llair {
 namespace itanium_demangle {
 class OutputStream;
 }
-} // namespace llvm
+} // namespace llair
 
-using llvm::itanium_demangle::OutputStream;
-using llvm::itanium_demangle::StringView;
+using llair::itanium_demangle::OutputStream;
+using llair::itanium_demangle::StringView;
 
-namespace llvm {
+namespace llair {
 namespace ms_demangle {
 
 // Storage classes
@@ -644,6 +644,6 @@ struct FunctionSymbolNode : public SymbolNode {
 };
 
 } // namespace ms_demangle
-} // namespace llvm
+} // namespace llair
 
 #endif

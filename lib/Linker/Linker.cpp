@@ -114,7 +114,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     std::vector<const llvm::GlobalValue *> src_global_values;
 
     std::transform(
-        src->getLLModule()->global_value_begin(), src->getLLModule()->global_value_end(),
+        src->getLLModule()->global_values().begin(), src->getLLModule()->global_values().end(),
         std::back_inserter(src_global_values), [](const auto &value) -> auto { return &value; });
     std::sort(src_global_values.begin(), src_global_values.end(),
               [](auto lhs, auto rhs) -> bool { return lhs->getName() < rhs->getName(); });
@@ -122,7 +122,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     std::vector<llvm::GlobalValue *> dst_global_values;
 
     std::transform(
-        dst->getLLModule()->global_value_begin(), dst->getLLModule()->global_value_end(),
+        dst->getLLModule()->global_values().begin(), dst->getLLModule()->global_values().end(),
         std::back_inserter(dst_global_values), [](auto &value) -> auto { return &value; });
     std::sort(dst_global_values.begin(), dst_global_values.end(),
               [](auto lhs, auto rhs) -> bool { return lhs->getName() < rhs->getName(); });
@@ -353,7 +353,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
     // And named metadata....
     static const std::set<llvm::StringRef> s_once_metadata_names = {
-        "air.version", "air.language_version", "air.compile_options", "llvm.ident",
+        "air.version", "air.language_version", "air.compile_options", "air.source_file_name", "llvm.ident",
         "llvm.module.flags"};
 
     for (llvm::Module::const_named_metadata_iterator I = M->named_metadata_begin(),

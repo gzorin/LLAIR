@@ -13,20 +13,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Demangle/MicrosoftDemangle.h"
-#include "llvm/Demangle/Demangle.h"
-#include "llvm/Demangle/MicrosoftDemangleNodes.h"
+#include "llair/Demangle/MicrosoftDemangle.h"
+#include "llair/Demangle/Demangle.h"
+#include "llair/Demangle/MicrosoftDemangleNodes.h"
 
-#include "llvm/Demangle/DemangleConfig.h"
-#include "llvm/Demangle/StringView.h"
-#include "llvm/Demangle/Utility.h"
+#include "llair/Demangle/DemangleConfig.h"
+#include "llair/Demangle/StringView.h"
+#include "llair/Demangle/Utility.h"
 
 #include <array>
 #include <cctype>
 #include <cstdio>
 #include <tuple>
 
-using namespace llvm;
+using namespace llair;
 using namespace ms_demangle;
 
 static bool
@@ -2212,7 +2212,7 @@ Demangler::dumpBackReferences() {
 }
 
 char *
-llvm::microsoftDemangle(const char *MangledName, char *Buf, size_t *N, int *Status,
+llair::microsoftDemangle(const char *MangledName, char *Buf, size_t *N, int *Status,
                         MSDemangleFlags Flags) {
     int          InternalStatus = demangle_success;
     Demangler    D;

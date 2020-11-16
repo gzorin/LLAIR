@@ -74,7 +74,11 @@ makeLibrary(const Module &module) {
 
     if (program) {
         // Write the module:
+ #if LLVM_VERSION_MAJOR > 7
+        llvm::WriteBitcodeToFile(*module.getLLModule(), *program->input);
+#else
         llvm::WriteBitcodeToFile(module.getLLModule(), *program->input);
+#endif
         program->input->close();
 
         // Read output:

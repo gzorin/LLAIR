@@ -10,13 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Demangle/MicrosoftDemangleNodes.h"
-#include "llvm/Demangle/DemangleConfig.h"
-#include "llvm/Demangle/Utility.h"
+#include "llair/Demangle/MicrosoftDemangleNodes.h"
+#include "llair/Demangle/DemangleConfig.h"
+#include "llair/Demangle/Utility.h"
 #include <cctype>
 #include <string>
 
-using namespace llvm;
+using namespace llair;
 using namespace ms_demangle;
 
 #define OUTPUT_ENUM_CLASS_VALUE(Enum, Value, Desc)                                                 \

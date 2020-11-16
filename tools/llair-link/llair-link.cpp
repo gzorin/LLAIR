@@ -88,7 +88,11 @@ main(int argc, char **argv) {
         return 1;
     }
 
+#if LLVM_VERSION_MAJOR > 7
+    llvm::WriteBitcodeToFile(*output->getLLModule(), output_file->os());
+#else
     llvm::WriteBitcodeToFile(output->getLLModule(), output_file->os());
+#endif
     output_file->keep();
 
     return 0;

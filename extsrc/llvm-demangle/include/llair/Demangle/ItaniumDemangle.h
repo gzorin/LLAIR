@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef DEMANGLE_ITANIUMDEMANGLE_H
-#define DEMANGLE_ITANIUMDEMANGLE_H
+#ifndef LLAIR_DEMANGLE_ITANIUMDEMANGLE_H
+#define LLAIR_DEMANGLE_ITANIUMDEMANGLE_H
 
 // FIXME: (possibly) incomplete list of features that clang mangles that this
 // file does not yet support:

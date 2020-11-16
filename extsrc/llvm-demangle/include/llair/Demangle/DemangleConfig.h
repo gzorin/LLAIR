@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEMANGLE_COMPILER_H
-#define LLVM_DEMANGLE_COMPILER_H
+#ifndef LLAIR_DEMANGLE_COMPILER_H
+#define LLAIR_DEMANGLE_COMPILER_H
 
 #ifdef _MSC_VER
 // snprintf is implemented in VS 2015
@@ -94,7 +94,7 @@
 #endif
 
 #define DEMANGLE_NAMESPACE_BEGIN                                                                   \
-    namespace llvm {                                                                               \
+    namespace llair {                                                                               \
     namespace itanium_demangle {
 #define DEMANGLE_NAMESPACE_END                                                                     \
     }                                                                                              \

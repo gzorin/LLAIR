@@ -6,13 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEMANGLE_DEMANGLE_H
-#define LLVM_DEMANGLE_DEMANGLE_H
+#ifndef LLAIR_DEMANGLE_DEMANGLE_H
+#define LLAIR_DEMANGLE_DEMANGLE_H
 
 #include <cstddef>
 #include <string>
 
-namespace llvm {
+namespace llair {
 /// This is a llvm local version of __cxa_demangle. Other than the name and
 /// being in the llvm namespace it is identical.
 ///
@@ -95,6 +95,6 @@ private:
     void *RootNode;
     void *Context;
 };
-} // namespace llvm
+} // namespace llair
 
 #endif

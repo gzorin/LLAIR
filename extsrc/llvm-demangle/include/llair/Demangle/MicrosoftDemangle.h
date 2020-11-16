@@ -6,17 +6,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEMANGLE_MICROSOFT_DEMANGLE_H
-#define LLVM_DEMANGLE_MICROSOFT_DEMANGLE_H
+#ifndef LLAIR_DEMANGLE_MICROSOFT_DEMANGLE_H
+#define LLAIR_DEMANGLE_MICROSOFT_DEMANGLE_H
 
-#include "llvm/Demangle/DemangleConfig.h"
-#include "llvm/Demangle/MicrosoftDemangleNodes.h"
-#include "llvm/Demangle/StringView.h"
-#include "llvm/Demangle/Utility.h"
+#include "llair/Demangle/DemangleConfig.h"
+#include "llair/Demangle/MicrosoftDemangleNodes.h"
+#include "llair/Demangle/StringView.h"
+#include "llair/Demangle/Utility.h"
 
 #include <utility>
 
-namespace llvm {
+namespace llair {
 namespace ms_demangle {
 // This memory allocator is extremely fast, but it doesn't call dtors
 // for allocated objects. That means you can't use STL containers
@@ -253,6 +253,6 @@ private:
 };
 
 } // namespace ms_demangle
-} // namespace llvm
+} // namespace llair
 
 #endif // LLVM_DEMANGLE_MICROSOFT_DEMANGLE_H
