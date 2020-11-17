@@ -158,11 +158,9 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         // llvm::ValueMapTypeRemapper overrides:
         llvm::Type *remapType(llvm::Type *SrcTy) override {
             // Search the type map:
-            {
-                auto it = d_type_map.find(SrcTy);
-                if (it != d_type_map.end()) {
-                    return it->second;
-                }
+            auto it = d_type_map.find(SrcTy);
+            if (it != d_type_map.end()) {
+                return it->second;
             }
 
             llvm::Type *RemappedTy = SrcTy;
@@ -171,8 +169,11 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             std::vector<llvm::Type *> RemappedContainedTys(SrcTy->getNumContainedTypes(), nullptr);
 
             std::transform(
-                SrcTy->subtype_begin(), SrcTy->subtype_end(), RemappedContainedTys.begin(),
-                [&](auto ContainedTy) -> llvm::Type * { return remapType(ContainedTy); });
+                SrcTy->subtype_begin(), SrcTy->subtype_end(),
+                RemappedContainedTys.begin(),
+                [&](auto ContainedTy) -> llvm::Type * {
+                    return remapType(ContainedTy);
+                });
 
             // Are any contained types remapped?
             if (!std::equal(SrcTy->subtype_begin(), SrcTy->subtype_end(),
@@ -310,8 +311,9 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             continue;
 
         GlobalVariable *GV = cast<GlobalVariable>(VMap[&*I]);
-        if (I->hasInitializer())
-            GV->setInitializer(MapValue(I->getInitializer(), VMap));
+        if (I->hasInitializer()) {
+            GV->setInitializer(MapValue(I->getInitializer(), VMap, RF_None, &TMap));
+        }
 
         SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
         I->getAllMetadata(MDs);
