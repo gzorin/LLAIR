@@ -6,6 +6,8 @@
 #include <llair/Linker/Linker.h>
 #include <llair/IR/Module.h>
 
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Module.h>
@@ -15,7 +17,6 @@
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <algorithm>
-#include <map>
 #include <set>
 
 using namespace llvm;
@@ -23,37 +24,6 @@ using namespace llvm;
 namespace llair {
 
 namespace {
-
-using NamedTypes = std::multimap<std::string, llvm::StructType *>;
-
-bool
-IsPrimeNamedType(llvm::StructType *struct_type) {
-    static llvm::Regex prime_named_type_regex(
-        "([a-zA-Z_][a-zA-Z0-9_:]*(\\.[a-zA-Z_:][a-zA-Z0-9_:]*)*)$");
-
-    return prime_named_type_regex.match(struct_type->getName());
-}
-
-NamedTypes
-GetNamedTypes(const llvm::Module *module) {
-    static llvm::Regex named_type_regex(
-        "([a-zA-Z_][a-zA-Z0-9_:]*(\\.[a-zA-Z_:][a-zA-Z0-9_:]*)*)(\\.[0-9]+)*");
-
-    NamedTypes result;
-
-    auto types = module->getIdentifiedStructTypes();
-
-    std::for_each(types.begin(), types.end(), [&result](auto struct_type) -> void {
-        llvm::SmallVector<llvm::StringRef, 2> matches;
-        if (!named_type_regex.match(struct_type->getName(), &matches)) {
-            return;
-        }
-
-        result.insert(std::make_pair(matches[1].str(), struct_type));
-    });
-
-    return result;
-}
 
 template <typename Input1, typename Input2, typename BinaryFunction, typename Compare>
 void
@@ -92,23 +62,7 @@ copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
 // shaders, but, not, say, Chromium).
 void
 linkModules(llair::Module *dst, const llair::Module *src) {
-    // Map types in 'src' to equivalent types in 'dst':
-    auto dst_types = GetNamedTypes(dst->getLLModule());
-    auto src_types = GetNamedTypes(src->getLLModule());
-
     llvm::DenseMap<llvm::Type *, llvm::Type *> type_map;
-
-    std::for_each(
-        src_types.begin(), src_types.end(),
-        [&dst_types, &type_map](const auto &src) -> void {
-            auto it = dst_types.find(src.first);
-            if (it != dst_types.end()) {
-                type_map[src.second] = it->second;
-                return;
-            }
-
-            dst_types.insert(src);
-        });
 
     // Collect global values in both 'src' and 'dst':
     std::vector<const llvm::GlobalValue *> src_global_values;
@@ -175,35 +129,34 @@ linkModules(llair::Module *dst, const llair::Module *src) {
                     return remapType(ContainedTy);
                 });
 
-            // Are any contained types remapped?
-            if (!std::equal(SrcTy->subtype_begin(), SrcTy->subtype_end(),
-                            RemappedContainedTys.begin())) {
-                switch (SrcTy->getTypeID()) {
-                case Type::FunctionTyID: {
-                    RemappedTy = llvm::FunctionType::get(
-                        RemappedContainedTys[0],
-                        ArrayRef(&RemappedContainedTys[1], SrcTy->getNumContainedTypes() - 1),
-                        cast<llvm::FunctionType>(SrcTy)->isVarArg());
-                } break;
-                case Type::PointerTyID: {
-                    RemappedTy = llvm::PointerType::get(
-                        RemappedContainedTys[0], cast<llvm::PointerType>(SrcTy)->getAddressSpace());
-                } break;
-                case Type::StructTyID: {
-                    auto SrcStructTy = llvm::cast<StructType>(SrcTy);
+            if (auto SrcStructTy = llvm::dyn_cast<llvm::StructType>(SrcTy); SrcStructTy && SrcStructTy->hasName()) {
+                RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
+                                                   SrcStructTy->isPacked());
+            }
+            else {
+                // Are any contained types remapped?
+                if (!std::equal(SrcTy->subtype_begin(), SrcTy->subtype_end(),
+                                RemappedContainedTys.begin())) {
+                    switch (SrcTy->getTypeID()) {
+                    case Type::FunctionTyID: {
+                        RemappedTy = llvm::FunctionType::get(
+                            RemappedContainedTys[0],
+                            ArrayRef(&RemappedContainedTys[1], SrcTy->getNumContainedTypes() - 1),
+                            cast<llvm::FunctionType>(SrcTy)->isVarArg());
+                    } break;
+                    case Type::PointerTyID: {
+                        RemappedTy = llvm::PointerType::get(
+                            RemappedContainedTys[0], cast<llvm::PointerType>(SrcTy)->getAddressSpace());
+                    } break;
+                    case Type::StructTyID: {
+                        auto SrcStructTy = llvm::cast<StructType>(SrcTy);
 
-                    if (SrcStructTy->isLiteral()) {
                         RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
-                                                           SrcStructTy->isPacked());
+                                                        SrcStructTy->isPacked());
+                    } break;
+                    default:
+                        break;
                     }
-                    else {
-                        RemappedTy = llvm::StructType::create(d_context, RemappedContainedTys,
-                                                              SrcStructTy->getName(),
-                                                              SrcStructTy->isPacked());
-                    }
-                } break;
-                default:
-                    break;
                 }
             }
 
