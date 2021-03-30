@@ -154,6 +154,12 @@ linkModules(llair::Module *dst, const llair::Module *src) {
                         RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
                                                         SrcStructTy->isPacked());
                     } break;
+                    case Type::ArrayTyID: {
+                        auto SrcArrayTy = llvm::cast<ArrayType>(SrcTy);
+
+                        RemappedTy = llvm::ArrayType::get(RemappedContainedTys[0],
+                                                          SrcArrayTy->getNumElements());
+                    } break;
                     default:
                         break;
                     }
