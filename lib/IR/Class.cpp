@@ -196,7 +196,7 @@ Class::findMethod(llvm::StringRef name) const {
         }
 
         bool operator()(const Method &lhs, llvm::StringRef rhs) const {
-            return rhs.compare(lhs.getName()) >= 0;
+            return lhs.getName().compare(rhs) < 0;
         }
     };
 
