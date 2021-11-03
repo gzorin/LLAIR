@@ -130,6 +130,7 @@ llair_example_init(int argc, const char * argv[], id<MTLDevice> device, MTKView 
 
 void
 llair_example_exit() {
+    s_context.reset();
 }
 
 void
