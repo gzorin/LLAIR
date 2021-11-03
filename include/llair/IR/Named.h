@@ -3,6 +3,7 @@
 #define LLAIR_IR_NAMED_H
 
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Allocator.h>
 
 namespace llvm {
 template<typename ValueTy> class StringMapEntry;
@@ -44,6 +45,8 @@ protected:
     void destroySymbolTableEntry();
 
     SymbolTable *d_symbol_table = nullptr;
+
+    llvm::MallocAllocator d_allocator;
 };
 
 } // End namespace llair

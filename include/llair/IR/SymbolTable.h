@@ -6,6 +6,7 @@
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Allocator.h>
 
 #include <cstdint>
 
@@ -64,6 +65,9 @@ public:
   /// content of the symbol table while debugging.
   /// @brief Print out symbol table on stderr
   void dump() const;
+
+  llvm::MallocAllocator& getAllocator() { return vmap.getAllocator(); }
+  const llvm::MallocAllocator& getAllocator() const { return vmap.getAllocator(); }
 
 /// @}
 /// @name Iteration

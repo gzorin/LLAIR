@@ -80,15 +80,20 @@ main(int argc, char **argv) {
 
     // Write it out:
     std::error_code                       error_code;
+#if LLVM_VERSION_MAJOR >= 7
+    std::unique_ptr<llvm::ToolOutputFile> output_file(
+        new llvm::ToolOutputFile(output_filename, error_code, llvm::sys::fs::OF_None));
+#else
     std::unique_ptr<llvm::ToolOutputFile> output_file(
         new llvm::ToolOutputFile(output_filename, error_code, llvm::sys::fs::F_None));
+#endif
 
     if (error_code) {
         llvm::errs() << error_code.message();
         return 1;
     }
 
-#if LLVM_VERSION_MAJOR > 7
+#if LLVM_VERSION_MAJOR >= 8
     llvm::WriteBitcodeToFile(*output->getLLModule(), output_file->os());
 #else
     llvm::WriteBitcodeToFile(output->getLLModule(), output_file->os());

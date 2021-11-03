@@ -81,7 +81,7 @@ finalizeLibrary(const Module& module) {
             gvs.insert(entry_point.getFunction()->getName());
         });
 
-#if LLVM_VERSION_MAJOR > 7
+#if LLVM_VERSION_MAJOR >= 8
     auto finalized_module = llvm::CloneModule(*module.getLLModule());
 #else
     auto finalized_module =  llvm::CloneModule(module.getLLModule());
@@ -118,7 +118,7 @@ makeLibrary(const llvm::Module &module) {
 
     if (program) {
         // Write the module:
- #if LLVM_VERSION_MAJOR > 7
+ #if LLVM_VERSION_MAJOR >= 8
         llvm::WriteBitcodeToFile(module, *program->input);
 #else
         llvm::WriteBitcodeToFile(&module, *program->input);

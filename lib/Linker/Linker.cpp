@@ -277,7 +277,11 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
         I->getAllMetadata(MDs);
         for (auto MD : MDs)
+#if LLVM_VERSION_MAJOR >= 13
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_ReuseAndMutateDistinctMDs, &TMap));
+#else
             GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs, &TMap));
+#endif
 
         copyComdat(GV, &*I);
     }
@@ -297,7 +301,11 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         }
 
         SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
+#if LLVM_VERSION_MAJOR >= 13
+        CloneFunctionInto(F, &I, VMap, CloneFunctionChangeType::DifferentModule, Returns, "", nullptr, &TMap);
+#else
         CloneFunctionInto(F, &I, VMap, /*ModuleLevelChanges=*/true, Returns, "", nullptr, &TMap);
+#endif
 
         if (I.hasPersonalityFn())
             F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap));

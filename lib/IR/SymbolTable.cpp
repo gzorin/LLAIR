@@ -58,7 +58,7 @@ void SymbolTable::reinsertValue(Named* V) {
   llvm::SmallString<256> UniqueName(V->getName().begin(), V->getName().end());
 
   // The name is too already used, just free it so we can allocate a new name.
-  V->getSymbolTableEntry()->Destroy();
+  V->getSymbolTableEntry()->Destroy(getAllocator());
 
   SymbolTableEntry *VN = makeUniqueName(V, UniqueName);
   V->setSymbolTableEntry(VN);

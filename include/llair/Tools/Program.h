@@ -22,7 +22,7 @@ getMemoryBufferForStream(int FD, const llvm::Twine &BufferName);
 
 struct Program {
 
-#if LLVM_VERSION_MAJOR > 7
+#if LLVM_VERSION_MAJOR >= 7
     llvm::sys::procid_t                   pid;
 #else
     llvm::sys::ProcessInfo::ProcessId     pid;

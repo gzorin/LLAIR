@@ -47,15 +47,20 @@ main(int argc, char **argv) {
     auto module = exit_on_err(llair::compileBuffer(*buffer, {}, *llair_context));
 
     std::error_code                       error_code;
+#if LLVM_VERSION_MAJOR >= 7
+    std::unique_ptr<llvm::ToolOutputFile> output_file(
+        new llvm::ToolOutputFile(output_filename, error_code, llvm::sys::fs::OF_None));
+#else
     std::unique_ptr<llvm::ToolOutputFile> output_file(
         new llvm::ToolOutputFile(output_filename, error_code, llvm::sys::fs::F_None));
+#endif
 
     if (error_code) {
         std::cerr << error_code.message() << std::endl;
         return 1;
     }
 
-#if LLVM_VERSION_MAJOR > 7
+#if LLVM_VERSION_MAJOR >= 8
     llvm::WriteBitcodeToFile(*module->getLLModule(), output_file->os());
 #else
     llvm::WriteBitcodeToFile(module->getLLModule(), output_file->os());

@@ -16,7 +16,7 @@ Named::setSymbolTable(SymbolTable *symbol_table) {
         return;
     }
 
-    std::string name = getName();
+    std::string name = getName().str();
     setName("");
 
     d_symbol_table = symbol_table;
@@ -71,7 +71,7 @@ Named::setName(llvm::StringRef name) {
             return;
         }
 
-        setSymbolTableEntry(SymbolTableEntry::Create(name));
+        setSymbolTableEntry(SymbolTableEntry::Create(name, d_allocator));
         getSymbolTableEntry()->setValue(this);
 
         return;
@@ -101,7 +101,12 @@ Named::getName() const {
 void
 Named::destroySymbolTableEntry() {
     if (auto symbol_table_entry = getSymbolTableEntry()) {
-        symbol_table_entry->Destroy();
+        if (d_symbol_table) {
+            symbol_table_entry->Destroy(d_symbol_table->getAllocator());
+        }
+        else {
+            symbol_table_entry->Destroy(d_allocator);
+        }
     }
 
     setSymbolTableEntry(nullptr);
