@@ -35,18 +35,16 @@ getMemoryBufferForStream(int FD, const llvm::Twine &BufferName) {
 }
 
 llvm::ErrorOr<llair::Program>
-openProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args) {
-    auto path_str = path.str();
-
+openProgram(const std::string& path, llvm::ArrayRef<std::string> args) {
     std::vector<char *> argv;
     argv.reserve(args.size());
     std::transform(
         args.begin(), args.end(), std::back_inserter(argv),
-        [](llvm::StringRef arg) -> char * { return const_cast<char *const>(arg.data()); });
+        [](const std::string& arg) -> char * { return const_cast<char *const>(arg.c_str()); });
     argv.push_back(nullptr);
 
     struct popen2 child;
-    int           e = popen2(path_str.c_str(), argv.data(), &child);
+    int           e = popen2(path.c_str(), argv.data(), &child);
 
     if (e < 0) {
         return std::error_code(errno, std::generic_category());
@@ -59,7 +57,7 @@ openProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args) {
 }
 
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
-runProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args,
+runProgram(const std::string& path, llvm::ArrayRef<std::string> args,
            llvm::MemoryBufferRef input) {
     auto program = openProgram(path, args);
 

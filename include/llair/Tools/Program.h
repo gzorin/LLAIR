@@ -9,6 +9,7 @@
 #include <llvm/Support/Program.h>
 
 #include <memory>
+#include <string>
 
 namespace llvm {
 class MemoryBuffer;
@@ -32,10 +33,10 @@ struct Program {
     int                                   output;
 };
 
-llvm::ErrorOr<Program> openProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args);
+llvm::ErrorOr<Program> openProgram(const std::string& path, llvm::ArrayRef<std::string> args);
 
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
-runProgram(llvm::StringRef path, llvm::ArrayRef<llvm::StringRef> args, llvm::MemoryBufferRef input);
+runProgram(const std::string& path, llvm::ArrayRef<std::string> args, llvm::MemoryBufferRef input);
 
 } // End namespace llair
 

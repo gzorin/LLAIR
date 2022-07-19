@@ -69,7 +69,7 @@ compileBuffer(llvm::MemoryBufferRef buffer, llvm::ArrayRef<llvm::StringRef> opti
     auto path     = getPathToCompileTool();
     auto filename = llvm::sys::path::filename(path).str();
 
-    std::vector<llvm::StringRef> args = {filename.data(), "-c", "-x", "metal"};
+    std::vector<std::string> args = {filename.data(), "-c", "-x", "metal"};
 
     std::copy(options.begin(), options.end(), std::back_inserter(args));
 
