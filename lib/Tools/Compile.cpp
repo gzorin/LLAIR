@@ -71,13 +71,22 @@ compileBuffer(llvm::MemoryBufferRef buffer, llvm::ArrayRef<llvm::StringRef> opti
 
     std::vector<std::string> args = {filename.data(), "-c", "-x", "metal"};
 
-    std::copy(options.begin(), options.end(), std::back_inserter(args));
+    std::transform(
+        options.begin(), options.end(),
+        std::back_inserter(args),
+        [](auto option) -> auto {
+            return option.str();
+        });
 
     args.push_back("-o");
     args.push_back("-");
     args.push_back("-");
 
+#if LLVM_VERSION_MAJOR >= 12
+    auto bitcode = llvm::errorOrToExpected(runProgram((std::string)path, args, buffer));
+#else
     auto bitcode = llvm::errorOrToExpected(runProgram(path.str(), args, buffer));
+#endif
 
     if (bitcode) {
         auto llmodule = llvm::getLazyBitcodeModule(**bitcode, context.getLLContext());

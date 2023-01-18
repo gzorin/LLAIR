@@ -114,7 +114,11 @@ makeLibrary(const llvm::Module &module) {
     llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "12.0", "-o", "-", "/dev/stdin"};
     //llvm::ArrayRef<std::string> args = {filename.data(), "-o", "-", "-"};
 
+#if LLVM_VERSION_MAJOR >= 12
+    auto program = llvm::errorOrToExpected(openProgram((std::string)path, args));
+#else
     auto program = llvm::errorOrToExpected(openProgram(path.str(), args));
+#endif
 
     if (program) {
         // Write the module:
@@ -148,7 +152,11 @@ makeLibrary(llvm::MemoryBufferRef input) {
     llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "12.0", "-o", "-", "/dev/stdin"};
     //llvm::ArrayRef<std::string> args = {filename.data(), "-o", "-", "-"};
 
+#if LLVM_VERSION_MAJOR >= 12
+    return llvm::errorOrToExpected(runProgram((std::string)path, args, input));
+#else
     return llvm::errorOrToExpected(runProgram(path.str(), args, input));
+#endif
 }
 
 } // namespace llair
