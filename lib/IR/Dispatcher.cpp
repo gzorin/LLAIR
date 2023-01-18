@@ -363,6 +363,7 @@ Dispatcher::Method::Method(Interface *interface, const Interface::Method *interf
     auto abstract_that = d_function->arg_begin();
 
     auto kind = builder->CreateLoad(
+        llvm::Type::getInt32Ty(ll_context),
         builder->CreateStructGEP(nullptr, abstract_that, 0));
 
     d_switcher = builder->CreateSwitch(kind,
