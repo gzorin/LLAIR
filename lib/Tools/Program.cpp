@@ -28,7 +28,7 @@ getMemoryBufferForStream(int FD, const llvm::Twine &BufferName) {
             return std::error_code(errno, std::generic_category());
         }
 
-        Buffer.set_size(Buffer.size() + nread);
+        Buffer.resize(Buffer.size() + nread);
     } while (nread == ChunkSize);
 
     return llvm::MemoryBuffer::getMemBufferCopy(Buffer, BufferName);
