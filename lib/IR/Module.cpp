@@ -178,8 +178,8 @@ Module::Module(llvm::StringRef id, LLAIRContext &context)
     d_llmodule->setDataLayout(context.getDataLayout());
     d_llmodule->setTargetTriple(context.getTargetTriple());
 
-    setVersion({2, 3, 0});
-    setLanguage({"Metal", {2, 3, 0}});
+    setVersion({2, 5, 0});
+    setLanguage({"Metal", {3, 0, 0}});
 }
 
 Module::Module(std::unique_ptr<llvm::Module> &&module)

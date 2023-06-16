@@ -111,7 +111,7 @@ makeLibrary(const llvm::Module &module) {
     auto path     = getPathToLibraryTool();
     auto filename = llvm::sys::path::filename(path).str();
 
-    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "12.0", "-o", "-", "/dev/stdin"};
+    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "13.0", "-o", "-", "/dev/stdin"};
     //llvm::ArrayRef<std::string> args = {filename.data(), "-o", "-", "-"};
 
 #if LLVM_VERSION_MAJOR >= 12
@@ -149,7 +149,7 @@ makeLibrary(llvm::MemoryBufferRef input) {
     auto path     = getPathToLibraryTool();
     auto filename = llvm::sys::path::filename(path).str();
 
-    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "12.0", "-o", "-", "/dev/stdin"};
+    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "13.0", "-o", "-", "/dev/stdin"};
     //llvm::ArrayRef<std::string> args = {filename.data(), "-o", "-", "-"};
 
 #if LLVM_VERSION_MAJOR >= 12
