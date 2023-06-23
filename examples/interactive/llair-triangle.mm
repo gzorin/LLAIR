@@ -41,6 +41,8 @@ struct Context {
     id<MTLRenderPipelineState> d_pipeline_state;
 
     simd::uint2 d_size;
+
+    id<MTLBuffer> d_viewport_buffer;
 };
 
 std::unique_ptr<Context> s_context;
@@ -61,6 +63,15 @@ CreateModule(unsigned char *bitcode, unsigned int bitcode_length,
 
     return std::move(*module);
 }
+
+struct Vertex {
+    simd::float4 position;
+    simd::float4 color;
+};
+
+struct Viewport {
+    simd::uint2 extent;
+};
 
 void
 llair_example_init(int argc, const char * argv[], id<MTLDevice> device, MTKView *view) {
@@ -93,6 +104,20 @@ llair_example_init(int argc, const char * argv[], id<MTLDevice> device, MTKView 
     }
 
     auto pipeline_descriptor = [MTLRenderPipelineDescriptor new];
+
+    auto vertex_descriptor = [[MTLVertexDescriptor alloc] init];
+
+    vertex_descriptor.attributes[0].format = MTLVertexFormatFloat4;
+    vertex_descriptor.attributes[0].bufferIndex = 0;
+    vertex_descriptor.attributes[0].offset = 0;
+
+    vertex_descriptor.attributes[1].format = MTLVertexFormatFloat4;
+    vertex_descriptor.attributes[1].bufferIndex = 0;
+    vertex_descriptor.attributes[1].offset = sizeof(simd::float4);
+
+    vertex_descriptor.layouts[0].stride = sizeof(Vertex);
+
+    pipeline_descriptor.vertexDescriptor = vertex_descriptor;
 
     auto vertex_function = [metal_library newFunctionWithName: @"VertexMain"];
 
@@ -136,6 +161,12 @@ llair_example_exit() {
 void
 llair_example_resize(CGSize size) {
     s_context->d_size = { (unsigned int)size.width, (unsigned int)size.height };
+
+    Viewport viewport = {
+        s_context->d_size
+    };
+
+    s_context->d_viewport_buffer = [s_context->d_device newBufferWithBytes: &viewport length: sizeof(Viewport) options: MTLResourceStorageModeManaged];
 }
 
 void
@@ -145,29 +176,37 @@ llair_example_draw(MTLRenderPassDescriptor *descriptor, id<MTLDrawable> drawable
 
     [command_encoder setViewport: { 0, 0, (double)s_context->d_size[0], (double)s_context->d_size[1], 0, 1 }];
 
-    struct Vertex {
-        simd::float2 position;
-        simd::float4 color;
+
+
+    Vertex vertices[] = {
+        { {  250,  -250, 0, 1 }, { 1, 0, 0, 1 } },
+        { { -250,  -250, 0, 1 }, { 0, 1, 0, 1 } },
+        { {    0,   250, 0, 1 }, { 0, 0, 1, 1 } }
     };
 
-    static const Vertex vertices[] = {
-        { {  250,  -250 }, { 1, 0, 0, 1 } },
-        { { -250,  -250 }, { 0, 1, 0, 1 } },
-        { {    0,   250 }, { 0, 0, 1, 1 } }
+    auto vertex_buffer = [s_context->d_device newBufferWithBytes: &vertices[0] length: sizeof(Vertex) * 3 options: MTLResourceStorageModeManaged];
+
+    uint32_t indices[] = {
+        0, 1, 2
     };
+
+    auto index_buffer = [s_context->d_device newBufferWithBytes: &indices[0] length: sizeof(uint32_t) * 3 options: MTLResourceStorageModeManaged];
 
     [command_encoder setRenderPipelineState: s_context->d_pipeline_state];
 
-    [command_encoder setVertexBytes: &vertices[0]
-                     length: sizeof(vertices)
+    [command_encoder setVertexBuffer: vertex_buffer
+                     offset: 0
                      atIndex: 0];
 
-    [command_encoder setVertexBytes: &s_context->d_size
-                     length: sizeof(simd::uint2)
+    [command_encoder setVertexBuffer: s_context->d_viewport_buffer
+                     offset: 0
                      atIndex: 1];
 
-    [command_encoder drawPrimitives: MTLPrimitiveTypeTriangle
-                     vertexStart: 0 vertexCount: 3];
+    [command_encoder drawIndexedPrimitives: MTLPrimitiveTypeTriangle
+                     indexCount: 3
+                     indexType: MTLIndexTypeUInt32
+                     indexBuffer: index_buffer
+                     indexBufferOffset: 0];
 
     [command_encoder endEncoding];
 
