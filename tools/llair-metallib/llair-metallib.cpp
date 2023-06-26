@@ -72,8 +72,8 @@ finalizeLibrary(const Module& module) {
     pmb.SizeLevel = 0;
 
     pmb.Inliner = llvm::createEverythingInlinerPass();
-    pmb.EnableMetalPasses = true;
-    pmb.SLPVectorize = true;
+    pmb.EnableMetalPasses = false;
+    pmb.SLPVectorize = false;
     pmb.LoopVectorize = true;
 
     pmb.populateFunctionPassManager(fpm);
