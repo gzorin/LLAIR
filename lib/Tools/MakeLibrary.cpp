@@ -70,8 +70,6 @@ getPathToLibraryTool() {
     return path;
 }
 
-namespace {
-
 std::unique_ptr<llvm::Module>
 finalizeLibrary(const Module& module) {
     llvm::StringSet gvs;
@@ -119,8 +117,6 @@ finalizeLibrary(const Module& module) {
     mpm.run(*finalized_module);
 
     return finalized_module;
-}
-
 }
 
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>

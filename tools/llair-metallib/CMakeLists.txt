@@ -15,7 +15,7 @@ target_include_directories(llair-metallib
   ${LLVM_INCLUDE_DIRS})
 
 target_link_libraries(llair-metallib
-  LLAIR LLAIRBitcode LLAIRLinker LLAIRDemangleLib
+  LLAIR LLAIRBitcode LLAIRLinker LLAIRTools LLAIRDemangleLib
   ${LLVM_LIBRARIES})
 
 install(

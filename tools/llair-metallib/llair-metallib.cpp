@@ -6,6 +6,7 @@
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
+#include <llair/Tools/MakeLibrary.h>
 
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -39,59 +40,6 @@ llvm::cl::opt<std::string> output_filename("o", llvm::cl::Required,
 } // namespace
 
 using namespace llair;
-
-namespace {
-
-std::unique_ptr<llvm::Module>
-finalizeLibrary(const Module& module) {
-    llvm::StringSet gvs;
-
-    std::for_each(
-        module.entry_point_begin(), module.entry_point_end(),
-        [&gvs](const auto& entry_point) -> void {
-            gvs.insert(entry_point.getFunction()->getName());
-        });
-
-#if LLVM_VERSION_MAJOR >= 8
-    auto finalized_module = llvm::CloneModule(*module.getLLModule());
-#else
-    auto finalized_module =  llvm::CloneModule(module.getLLModule());
-#endif
-
-    if (auto class_md = finalized_module->getNamedMetadata("llair.class"); class_md) {
-        finalized_module->eraseNamedMetadata(class_md);
-    }
-
-    llvm::legacy::FunctionPassManager fpm(finalized_module.get());
-
-    llvm::legacy::PassManager mpm;
-
-    llvm::PassManagerBuilder pmb;
-
-    pmb.OptLevel  = 3;
-    pmb.SizeLevel = 0;
-
-    pmb.Inliner = llvm::createEverythingInlinerPass();
-    pmb.EnableMetalPasses = false;
-    pmb.SLPVectorize = false;
-    pmb.LoopVectorize = true;
-
-    pmb.populateFunctionPassManager(fpm);
-    pmb.populateModulePassManager(mpm);
-
-    fpm.doInitialization();
-
-    for (auto& function : *finalized_module) {
-        fpm.run(function);
-    }
-    fpm.doFinalization();
-
-    mpm.run(*finalized_module);
-
-    return finalized_module;
-}
-
-}
 
 //
 int

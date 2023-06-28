@@ -13,6 +13,8 @@ class Module;
 
 void setPathToLibraryTool(llvm::StringRef path);
 
+std::unique_ptr<llvm::Module> finalizeLibrary(const Module&);
+
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(const llvm::Module &module);
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(const Module &module);
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> makeLibrary(llvm::MemoryBufferRef input);
