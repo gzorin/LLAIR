@@ -14,6 +14,7 @@
 #include <llvm/Support/Regex.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <algorithm>
@@ -190,6 +191,10 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     //
     for (llvm::Module::const_global_iterator I = M->global_begin(), E = M->global_end(); I != E;
          ++I) {
+        if (I->getName() == "llvm.global_ctors") {
+            continue;
+        }
+
         GlobalVariable *GV = nullptr;
 
         if (I->isDeclaration()) {
@@ -266,6 +271,10 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     //
     for (llvm::Module::const_global_iterator I = M->global_begin(), E = M->global_end(); I != E;
          ++I) {
+        if (I->getName() == "llvm.global_ctors") {
+            continue;
+        }
+
         if (I->isDeclaration())
             continue;
 
@@ -311,6 +320,10 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap));
 
         copyComdat(F, &I);
+
+        if (F->hasSection() && F->getSection() == "air.static_init") {
+            appendToGlobalCtors(*New, F, 65535);
+        }
     }
 
     // And aliases
