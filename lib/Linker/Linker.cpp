@@ -26,6 +26,29 @@ namespace llair {
 
 namespace {
 
+llvm::Regex&
+cxx_identifier_regex() {
+    static llvm::Regex s_cxx_identifier_regex("(struct|class)\\.([a-zA-Z_][a-zA-Z0-9_:]*(\\.[a-zA-Z_:]+)*)(\\.[0-9]+)*");
+    return s_cxx_identifier_regex;
+}
+
+bool
+test_cxx_identifier_regex(llvm::StringRef identifier) {
+    return cxx_identifier_regex().match(identifier);
+}
+
+llvm::Optional<llvm::StringRef>
+match_cxx_identifier_regex(llvm::StringRef identifier) {
+    llvm::SmallVector<llvm::StringRef, 3> matches;
+    cxx_identifier_regex().match(identifier, &matches);
+
+    if (matches.empty()) {
+        return {};
+    }
+
+    return { matches[2] };
+}
+
 template <typename Input1, typename Input2, typename BinaryFunction, typename Compare>
 void
 for_each_intersection(Input1 first1, Input1 last1, Input2 first2, Input2 last2, BinaryFunction fn,
@@ -64,6 +87,27 @@ copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
 void
 linkModules(llair::Module *dst, const llair::Module *src) {
     llvm::DenseMap<llvm::Type *, llvm::Type *> type_map;
+    llvm::StringMap<llvm::StructType *> opaque_struct_type_map;
+
+    auto identified_struct_types = dst->getLLModule()->getIdentifiedStructTypes();
+
+    std::for_each(
+        identified_struct_types.begin(), identified_struct_types.end(),
+        [&opaque_struct_type_map](auto *identified_struct_type) -> void {
+            if (!identified_struct_type->isOpaque()) {
+                return;
+            }
+
+            auto identifier = match_cxx_identifier_regex(identified_struct_type->getName());
+
+            if (!identifier) {
+                return;
+            }
+
+            assert(opaque_struct_type_map.count(*identifier) == 0);
+
+            opaque_struct_type_map.insert({ *identifier, identified_struct_type });
+        });
 
     // Collect global values in both 'src' and 'dst':
     std::vector<const llvm::GlobalValue *> src_global_values;
@@ -106,9 +150,12 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     // Now clone 'src' into 'dst':
     class TypeMapper : public llvm::ValueMapTypeRemapper {
     public:
-        TypeMapper(llvm::LLVMContext &context, llvm::DenseMap<llvm::Type *, llvm::Type *> &type_map)
+        TypeMapper(llvm::LLVMContext &context,
+                   llvm::DenseMap<llvm::Type *, llvm::Type *> &type_map,
+                   llvm::StringMap<llvm::StructType *> &opaque_struct_type_map)
             : d_context(context)
-            , d_type_map(type_map) {}
+            , d_type_map(type_map)
+            , d_opaque_struct_type_map(opaque_struct_type_map) {}
 
         // llvm::ValueMapTypeRemapper overrides:
         llvm::Type *remapType(llvm::Type *SrcTy) override {
@@ -131,8 +178,22 @@ linkModules(llair::Module *dst, const llair::Module *src) {
                 });
 
             if (auto SrcStructTy = llvm::dyn_cast<llvm::StructType>(SrcTy); SrcStructTy && SrcStructTy->hasName()) {
-                RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
-                                                   SrcStructTy->isPacked());
+                if (SrcStructTy->isOpaque()) {
+                    auto identifier = match_cxx_identifier_regex(SrcStructTy->getName());
+
+                    if (identifier) {
+                        auto it = d_opaque_struct_type_map.find(*identifier);
+                        if (it == d_opaque_struct_type_map.end()) {
+                            it = d_opaque_struct_type_map.insert({ *identifier, SrcStructTy }).first;
+                        }
+
+                        RemappedTy = it->second;
+                    }
+                }
+                else {
+                    RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
+                                                       SrcStructTy->isPacked());
+                }
             }
             else {
                 // Are any contained types remapped?
@@ -176,9 +237,10 @@ linkModules(llair::Module *dst, const llair::Module *src) {
     private:
         llvm::LLVMContext &                         d_context;
         llvm::DenseMap<llvm::Type *, llvm::Type *> &d_type_map;
+        llvm::StringMap<llvm::StructType *>        &d_opaque_struct_type_map;
     };
 
-    TypeMapper TMap(dst->getLLModule()->getContext(), type_map);
+    TypeMapper TMap(dst->getLLModule()->getContext(), type_map, opaque_struct_type_map);
 
     ValueToValueMapTy VMap;
 
