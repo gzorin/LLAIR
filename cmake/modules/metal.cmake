@@ -29,7 +29,7 @@ function(compile_metal_source src result)
 
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}
-        COMMAND ${METAL} -c -x metal -std=metal3.0 -o ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc} ${src}
+        COMMAND ${METAL} -c -x metal -std=metal3.1 -o ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc} ${src}
         MAIN_DEPENDENCY ${src}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     message("Generated ${CMAKE_CURRENT_BINARY_DIR}/${dot_bc}")
