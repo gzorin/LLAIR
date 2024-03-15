@@ -72,14 +72,6 @@ getPathToLibraryTool() {
 
 std::unique_ptr<llvm::Module>
 finalizeLibrary(const Module& module) {
-    llvm::StringSet gvs;
-
-    std::for_each(
-        module.entry_point_begin(), module.entry_point_end(),
-        [&gvs](const auto& entry_point) -> void {
-            gvs.insert(entry_point.getFunction()->getName());
-        });
-
 #if LLVM_VERSION_MAJOR >= 8
     auto finalized_module = llvm::CloneModule(*module.getLLModule());
 #else
@@ -97,12 +89,13 @@ finalizeLibrary(const Module& module) {
     llvm::PassManagerBuilder pmb;
 
     pmb.OptLevel  = 3;
-    pmb.SizeLevel = 0;
+    pmb.SizeLevel = 1;
 
-    pmb.Inliner = llvm::createEverythingInlinerPass();
-    pmb.EnableMetalPasses = false;
-    pmb.SLPVectorize = false;
-    pmb.LoopVectorize = true;
+    pmb.Inliner = llvm::createFunctionInliningPass(pmb.OptLevel, pmb.SizeLevel, false);
+
+    pmb.DisableUnrollLoops = pmb.OptLevel == 0;
+    pmb.LoopVectorize = pmb.OptLevel > 1 && pmb.SizeLevel < 2;
+    pmb.SLPVectorize = pmb.OptLevel > 1 && pmb.SizeLevel < 2;
 
     pmb.populateFunctionPassManager(fpm);
     pmb.populateModulePassManager(mpm);
