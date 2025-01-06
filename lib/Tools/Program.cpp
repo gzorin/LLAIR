@@ -17,19 +17,20 @@ llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
 getMemoryBufferForStream(int FD, const llvm::Twine &BufferName) {
     const ssize_t                ChunkSize = 4096 * 4;
     llvm::SmallString<ChunkSize> Buffer;
-    ssize_t                      nread;
+    ssize_t                      size = 0, nread;
 
     do {
-        Buffer.reserve(Buffer.size() + ChunkSize);
-
-        nread = read(FD, Buffer.end(), ChunkSize);
+        Buffer.resize_for_overwrite(size + ChunkSize);
+        nread = read(FD, Buffer.begin() + size, ChunkSize);
 
         if (nread == -1) {
             return std::error_code(errno, std::generic_category());
         }
 
-        Buffer.resize(Buffer.size() + nread);
+        size += nread;
     } while (nread == ChunkSize);
+
+    Buffer.truncate(size);
 
     return llvm::MemoryBuffer::getMemBufferCopy(Buffer, BufferName);
 }
