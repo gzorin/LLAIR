@@ -28,27 +28,19 @@ void finalizeInterfaces(Module *, llvm::ArrayRef<Interface *>, std::function<uin
 class Linker {
 public:
 
-    class Delegate {
-        virtual ~Delegate();
-
-        virtual uint32_t getKindForClass(const Class *) = 0;
-    };
-
-    Linker(Delegate&, llvm::StringRef, LLAIRContext &);
-
-    void addInterface(Interface *);
+    Linker(Module&);
+    ~Linker();
 
     void linkModule(const Module *);
-
-    std::unique_ptr<Module> releaseModule();
+    void syncMetadata();
 
 private:
 
-    Delegate& d_delegate;
+    class TypeMapper;
 
-    std::unique_ptr<Module> d_module;
+    std::unique_ptr<TypeMapper> TMap;
 
-    llvm::StringMap<llvm::DenseSet<Interface *>> d_interface_index;
+    Module& d_dst;
 };
 
 } // End namespace llair

@@ -18,7 +18,6 @@
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <algorithm>
-#include <set>
 
 using namespace llvm;
 
@@ -59,7 +58,77 @@ copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
     Dst->setComdat(DC);
 }
 
-class TypeMapper : public llvm::ValueMapTypeRemapper {
+} // namespace
+
+void
+linkModules(llair::Module *dst, const llair::Module *src) {
+    Linker linker(*dst);
+    linker.linkModule(src);
+
+    dst->syncMetadata();
+}
+
+void
+finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::function<uint32_t(const Class*)> getKindForClass) {
+    auto dispatcher_module = std::make_unique<Module>("", module->getContext());
+
+    llvm::StringMap<llvm::DenseSet<Interface *>> interface_index;
+
+    std::for_each(
+        interfaces.begin(), interfaces.end(),
+        [&interface_index](auto interface) -> void {
+            std::for_each(
+                interface->method_begin(), interface->method_end(),
+                [&interface_index, interface](const auto& method) -> void {
+                    interface_index[method.getName()].insert(interface);
+                });
+        });
+
+    llvm::DenseMap<llvm::StructType *, Interface *> interfaces_by_type;
+
+    std::for_each(
+        module->class_begin(), module->class_end(),
+        [getKindForClass, &dispatcher_module, &interface_index, &interfaces_by_type](const auto& klass) -> void {
+            // Find all interfaces that match `klass`:
+            llvm::DenseMap<Interface *, std::size_t> implemented_method_count;
+
+            std::for_each(
+                klass.method_begin(), klass.method_end(),
+                [&interface_index, &implemented_method_count](const auto& method) {
+                    auto it = interface_index.find(method.getName());
+                    if (it == interface_index.end()) {
+                        return;
+                    }
+
+                    std::for_each(
+                        it->second.begin(), it->second.end(),
+                        [&implemented_method_count](auto interface) {
+                            implemented_method_count[interface]++;
+                        });
+                });
+
+            std::for_each(
+                implemented_method_count.begin(), implemented_method_count.end(),
+                [getKindForClass, &dispatcher_module, &interfaces_by_type, &klass](auto tmp) {
+                    auto [ interface, implemented_method_count ] = tmp;
+                    if (implemented_method_count != interface->method_size()) {
+                        return;
+                    }
+
+                    auto r_dispatchers = dispatcher_module->getOrInsertDispatchers(interface);
+                    assert(r_dispatchers.first != r_dispatchers.second);
+
+                    auto dispatcher = *r_dispatchers.first;
+                    dispatcher->insertImplementation(getKindForClass(&klass), &klass);
+
+                    interfaces_by_type.insert({ interface->getType(), interface });
+                });
+        });
+
+    linkModules(module, dispatcher_module.get());
+}
+
+class Linker::TypeMapper : public llvm::ValueMapTypeRemapper {
 public:
     TypeMapper(llvm::LLVMContext &context)
         : d_context(context) {
@@ -172,7 +241,12 @@ private:
     llvm::StringMap<llvm::StructType *>         d_opaque_struct_type_map;
 };
 
-} // namespace
+Linker::Linker(Module &dst)
+: TMap(new TypeMapper(dst.getLLContext())), d_dst(dst) {
+}
+
+Linker::~Linker() {
+}
 
 // Performs a task similar to LLVM's link `linkModules()`, except that it
 // modifies neither the source module nor any of the non-literal
@@ -180,11 +254,9 @@ private:
 // probably naive compared to LLVM's, sufficient to link small Metal
 // shaders, but, not, say, Chromium).
 void
-linkModules(llair::Module *dst, const llair::Module *src) {
-    auto New = dst->getLLModule();
-
-    TypeMapper TMap(New->getContext());
-    TMap.updateIdentifiedOpaqueStructTypes(New);
+Linker::linkModule(const Module *src) {
+    auto New = d_dst.getLLModule();
+    TMap->updateIdentifiedOpaqueStructTypes(New);
 
     auto M   = src->getLLModule();
 
@@ -229,7 +301,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         }
 
         if (!GV) {
-            GV = new GlobalVariable(*New, TMap.remapType(I->getValueType()), I->isConstant(),
+            GV = new GlobalVariable(*New, TMap->remapType(I->getValueType()), I->isConstant(),
                                     I->getLinkage(), (Constant *)nullptr, I->getName(),
                                     (GlobalVariable *)nullptr, I->getThreadLocalMode(),
                                     I->getType()->getAddressSpace());
@@ -256,7 +328,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         }
 
         if (!NF) {
-            NF = Function::Create(cast<FunctionType>(TMap.remapType(I.getValueType())),
+            NF = Function::Create(cast<FunctionType>(TMap->remapType(I.getValueType())),
                                   I.getLinkage(), I.getName(), New);
             NF->copyAttributesFrom(&I);
         }
@@ -273,7 +345,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
         Function *NF = New->getFunction(I.getName());
 
         if (!NF || !NF->isDeclaration()) {
-            NF = Function::Create(cast<FunctionType>(TMap.remapType(I.getValueType())),
+            NF = Function::Create(cast<FunctionType>(TMap->remapType(I.getValueType())),
                                   I.getLinkage(), I.getName(), New);
         }
 
@@ -304,14 +376,14 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
         GlobalVariable *GV = cast<GlobalVariable>(VMap[&*I]);
         if (I->hasInitializer()) {
-            GV->setInitializer(MapValue(I->getInitializer(), VMap, RF_None, &TMap));
+            GV->setInitializer(MapValue(I->getInitializer(), VMap, RF_None, TMap.get()));
         }
 
         SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
         I->getAllMetadata(MDs);
         for (auto MD : MDs)
 #if LLVM_VERSION_MAJOR >= 13
-            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_ReuseAndMutateDistinctMDs, &TMap));
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_ReuseAndMutateDistinctMDs, TMap.get()));
 #else
             GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs, &TMap));
 #endif
@@ -335,7 +407,7 @@ linkModules(llair::Module *dst, const llair::Module *src) {
 
         SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
 #if LLVM_VERSION_MAJOR >= 13
-        CloneFunctionInto(F, &I, VMap, CloneFunctionChangeType::DifferentModule, Returns, "", nullptr, &TMap);
+        CloneFunctionInto(F, &I, VMap, CloneFunctionChangeType::DifferentModule, Returns, "", nullptr, TMap.get());
 #else
         CloneFunctionInto(F, &I, VMap, /*ModuleLevelChanges=*/true, Returns, "", nullptr, &TMap);
 #endif
@@ -372,97 +444,13 @@ linkModules(llair::Module *dst, const llair::Module *src) {
             continue;
 
         for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
-            NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap, RF_None, &TMap));
+            NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap, RF_None, TMap.get()));
     }
-
-    dst->syncMetadata();
 }
 
 void
-finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::function<uint32_t(const Class*)> getKindForClass) {
-    auto dispatcher_module = std::make_unique<Module>("", module->getContext());
-
-    llvm::StringMap<llvm::DenseSet<Interface *>> interface_index;
-
-    std::for_each(
-        interfaces.begin(), interfaces.end(),
-        [&interface_index](auto interface) -> void {
-            std::for_each(
-                interface->method_begin(), interface->method_end(),
-                [&interface_index, interface](const auto& method) -> void {
-                    interface_index[method.getName()].insert(interface);
-                });
-        });
-
-    llvm::DenseMap<llvm::StructType *, Interface *> interfaces_by_type;
-
-    std::for_each(
-        module->class_begin(), module->class_end(),
-        [getKindForClass, &dispatcher_module, &interface_index, &interfaces_by_type](const auto& klass) -> void {
-            // Find all interfaces that match `klass`:
-            llvm::DenseMap<Interface *, std::size_t> implemented_method_count;
-
-            std::for_each(
-                klass.method_begin(), klass.method_end(),
-                [&interface_index, &implemented_method_count](const auto& method) {
-                    auto it = interface_index.find(method.getName());
-                    if (it == interface_index.end()) {
-                        return;
-                    }
-
-                    std::for_each(
-                        it->second.begin(), it->second.end(),
-                        [&implemented_method_count](auto interface) {
-                            implemented_method_count[interface]++;
-                        });
-                });
-
-            std::for_each(
-                implemented_method_count.begin(), implemented_method_count.end(),
-                [getKindForClass, &dispatcher_module, &interfaces_by_type, &klass](auto tmp) {
-                    auto [ interface, implemented_method_count ] = tmp;
-                    if (implemented_method_count != interface->method_size()) {
-                        return;
-                    }
-
-                    auto r_dispatchers = dispatcher_module->getOrInsertDispatchers(interface);
-                    assert(r_dispatchers.first != r_dispatchers.second);
-
-                    auto dispatcher = *r_dispatchers.first;
-                    dispatcher->insertImplementation(getKindForClass(&klass), &klass);
-
-                    interfaces_by_type.insert({ interface->getType(), interface });
-                });
-        });
-
-    linkModules(module, dispatcher_module.get());
-}
-
-Linker::Linker(Delegate& delegate, llvm::StringRef name, LLAIRContext& context)
-: d_delegate(delegate)
-, d_module(std::make_unique<Module>(name, context)) {
-}
-
-void
-Linker::addInterface(Interface *interface) {
-    std::for_each(
-        interface->method_begin(), interface->method_end(),
-        [this, interface](const auto& method) -> void {
-            d_interface_index[method.getName()].insert(interface);
-        });
-}
-
-void
-Linker::linkModule(const Module *module) {
-
-}
-
-std::unique_ptr<Module>
-Linker::releaseModule() {
-    return std::move(d_module);
-}
-
-Linker::Delegate::~Delegate() {
+Linker::syncMetadata() {
+    d_dst.syncMetadata();
 }
 
 } // End namespace llair
