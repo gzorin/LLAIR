@@ -49,24 +49,6 @@ match_cxx_identifier_regex(llvm::StringRef identifier) {
     return { matches[2] };
 }
 
-template <typename Input1, typename Input2, typename BinaryFunction, typename Compare>
-void
-for_each_intersection(Input1 first1, Input1 last1, Input2 first2, Input2 last2, BinaryFunction fn,
-                      Compare comp) {
-    while (first1 != last1 && first2 != last2) {
-        if (comp(*first1, *first2)) {
-            ++first1;
-        }
-        else {
-            if (!comp(*first2, *first1)) {
-                fn(*first1, *first2);
-                ++first1;
-            }
-            ++first2;
-        }
-    }
-}
-
 void
 copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
     const Comdat *SC = Src->getComdat();
@@ -199,53 +181,33 @@ private:
 // shaders, but, not, say, Chromium).
 void
 linkModules(llair::Module *dst, const llair::Module *src) {
-    TypeMapper TMap(dst->getLLModule()->getContext());
+    auto New = dst->getLLModule();
 
-    TMap.updateIdentifiedOpaqueStructTypes(dst->getLLModule());
+    TypeMapper TMap(New->getContext());
+    TMap.updateIdentifiedOpaqueStructTypes(New);
 
-    // Collect global values in both 'src' and 'dst':
-    std::vector<const llvm::GlobalValue *> src_global_values;
-
-    std::transform(
-        src->getLLModule()->global_values().begin(), src->getLLModule()->global_values().end(),
-        std::back_inserter(src_global_values), [](const auto &value) -> auto { return &value; });
-    std::sort(src_global_values.begin(), src_global_values.end(),
-              [](auto lhs, auto rhs) -> bool { return lhs->getName() < rhs->getName(); });
-
-    std::vector<llvm::GlobalValue *> dst_global_values;
-
-    std::transform(
-        dst->getLLModule()->global_values().begin(), dst->getLLModule()->global_values().end(),
-        std::back_inserter(dst_global_values), [](auto &value) -> auto { return &value; });
-    std::sort(dst_global_values.begin(), dst_global_values.end(),
-              [](auto lhs, auto rhs) -> bool { return lhs->getName() < rhs->getName(); });
-
-    struct CompareGlobalValues {
-        bool operator()(const llvm::GlobalValue *src_value,
-                        const llvm::GlobalValue *dst_value) const {
-            return src_value->getName() < dst_value->getName();
-        }
-    };
+    auto M   = src->getLLModule();
 
     // Map global values declared in 'src' to global values defined in 'dst':
     llvm::DenseMap<const llvm::GlobalValue *, llvm::GlobalValue *> src_to_dst_global_value_map;
 
-    for_each_intersection(
-        src_global_values.begin(), src_global_values.end(), dst_global_values.begin(),
-        dst_global_values.end(),
-        [&src_to_dst_global_value_map](auto src_value, auto dst_value) -> void {
-            if (src_value->isDeclarationForLinker() &&
-                (dst_value->isStrongDefinitionForLinker() || dst_value->isDeclarationForLinker())) {
-                src_to_dst_global_value_map[src_value] = dst_value;
-            }
-        },
-        CompareGlobalValues());
+    for (const auto& src_global_value : M->global_values()) {
+        if (!src_global_value.isDeclarationForLinker()) {
+            continue;
+        }
+
+        auto dst_global_value = New->getNamedValue(src_global_value.getName());
+
+        if (!dst_global_value ||
+            (!dst_global_value->isStrongDefinitionForLinker() && !dst_global_value->isDeclarationForLinker())) {
+            continue;
+        }
+
+        src_to_dst_global_value_map[&src_global_value] = dst_global_value;
+    }
 
     // Now clone 'src' into 'dst':
     ValueToValueMapTy VMap;
-
-    auto M   = src->getLLModule();
-    auto New = dst->getLLModule();
 
     // Loop over all of the global variables, making corresponding globals in the
     // new module.  Here we add them to the VMap and to the new Module.  We
