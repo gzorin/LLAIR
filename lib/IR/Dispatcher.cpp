@@ -95,7 +95,7 @@ Dispatcher::Dispatcher(llvm::Metadata *md, Module *module) {
             auto kind = llvm::mdconst::extract<llvm::ConstantInt>(implementation_md->getOperand(0).get())->getZExtValue();
             auto name = llvm::cast<llvm::MDString>(implementation_md->getOperand(1).get())->getString();
 
-            d_implementations.insert({ kind, { name.str() } });
+            d_implementations.insert({ (unsigned)kind, { name.str() } });
         });
 }
 
