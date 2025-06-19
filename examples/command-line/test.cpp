@@ -14,5 +14,7 @@ main(int argc, const char **argv) {
 
     std::unique_ptr<llair::Module> module(new llair::Module("test", *context));
 
+#if defined(LLVM_ENABLE_DUMP)
     module->getLLModule()->dump();
+#endif
 }
