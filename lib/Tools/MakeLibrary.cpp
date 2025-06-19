@@ -129,19 +129,78 @@ makeLibrary(const Module &module) {
     return makeLibrary(*finalized_module);
 }
 
+namespace {
+
+std::unique_ptr<llvm::Module>
+finalizeLibraryForLLD(const Module& module) {
+    llvm::StringSet gvs;
+
+    std::for_each(
+        module.entry_point_begin(), module.entry_point_end(),
+        [&gvs](const auto& entry_point) -> void {
+            gvs.insert(entry_point.getFunction()->getName());
+        });
+
+#if LLVM_VERSION_MAJOR >= 8
+    auto finalized_module = llvm::CloneModule(*module.getLLModule());
+#else
+    auto finalized_module =  llvm::CloneModule(module.getLLModule());
+#endif
+
+    if (auto class_md = finalized_module->getNamedMetadata("llair.class"); class_md) {
+        finalized_module->eraseNamedMetadata(class_md);
+    }
+
+    llvm::legacy::PassManager mpm;
+
+    mpm.add(llvm::createInternalizePass([&gvs](const llvm::GlobalValue& gv) -> bool {
+        return gvs.count(gv.getName()) == 1;
+    }));
+
+    mpm.add(llvm::createGlobalDCEPass());
+
+    mpm.run(*finalized_module);
+
+    return finalized_module;
+}
+
+}
+
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-makeLibrary(llvm::MemoryBufferRef input) {
+makeLibraryWithLLD(const llvm::Module &module) {
     auto path     = getPathToLibraryTool();
     auto filename = llvm::sys::path::filename(path).str();
 
-    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "13.0", "-o", "-", "/dev/stdin"};
-    //llvm::ArrayRef<std::string> args = {filename.data(), "-o", "-", "-"};
+    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "14.0", "-o", "-", "/dev/stdin"};
 
 #if LLVM_VERSION_MAJOR >= 12
-    return llvm::errorOrToExpected(runProgram((std::string)path, args, input));
+    auto program = llvm::errorOrToExpected(openProgram((std::string)path, args));
 #else
-    return llvm::errorOrToExpected(runProgram(path.str(), args, input));
+    auto program = llvm::errorOrToExpected(openProgram(path.str(), args));
 #endif
+
+    if (program) {
+        // Write the module:
+ #if LLVM_VERSION_MAJOR >= 8
+        llvm::WriteBitcodeToFile(module, *program->input);
+#else
+        llvm::WriteBitcodeToFile(&module, *program->input);
+#endif
+        program->input->close();
+
+        // Read output:
+        return llvm::errorOrToExpected(getMemoryBufferForStream(program->output, ""));
+    }
+    else {
+        return program.takeError();
+    }
+}
+
+llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
+makeLibraryWithLLD(const Module &module) {
+    auto finalized_module = finalizeLibraryForLLD(module);
+
+    return makeLibraryWithLLD(*finalized_module);
 }
 
 } // namespace llair
