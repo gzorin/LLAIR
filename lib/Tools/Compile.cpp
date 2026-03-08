@@ -16,60 +16,13 @@
 
 namespace llair {
 
-namespace {
-
-llvm::SmallString<256> &
-pathToCompileTool() {
-    static llvm::SmallString<256> s_pathToCompileTool;
-    return s_pathToCompileTool;
-}
-
-} // namespace
-
-void
-setPathToCompileTool(llvm::StringRef path) {
-    llvm::sys::path::native(path, pathToCompileTool());
-}
-
-llvm::SmallString<256>
-getPathToCompileTool() {
-    llvm::SmallString<256> path;
-
-    // Is the path set via setPathToCompileTool()?
-    path = pathToCompileTool();
-
-    // Is the path set via an environment variable?
-    if (path.empty()) {
-        auto tmp = llvm::sys::Process::GetEnv("LLAIR_COMPILE_TOOL_PATH");
-        if (tmp) {
-            llvm::sys::path::native(*tmp, path);
-        }
-    }
-
-    // Is the tools path set?
-    if (path.empty()) {
-        auto tmp = getPathToTools();
-        if (llvm::sys::fs::is_directory(tmp)) {
-            path = tmp;
-            llvm::sys::path::append(path, "metal");
-        }
-    }
-
-    // Make the path absolute:
-    if (!path.empty() && llvm::sys::path::is_relative(path)) {
-        llvm::sys::fs::make_absolute(path);
-    }
-
-    return path;
-}
-
 llvm::Expected<std::unique_ptr<Module>>
 compileBuffer(llvm::MemoryBufferRef buffer, llvm::ArrayRef<llvm::StringRef> options,
               LLAIRContext &context) {
-    auto path     = getPathToCompileTool();
+    auto path     = getPathToTools();
     auto filename = llvm::sys::path::filename(path).str();
 
-    std::vector<std::string> args = {filename.data(), "-c", "-x", "metal"};
+    std::vector<std::string> args = {filename.data(), "metal", "-c", "-x", "metal"};
 
     std::transform(
         options.begin(), options.end(),

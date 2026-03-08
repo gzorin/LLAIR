@@ -1,9 +1,6 @@
 find_program(XCRUN xcrun)
 
-execute_process(
-    COMMAND ${XCRUN} --sdk macosx --find metal
-    OUTPUT_VARIABLE METAL
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(METAL ${XCRUN} --sdk macosx metal)
 
 find_program(XXD xxd)
 

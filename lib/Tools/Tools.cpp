@@ -37,6 +37,15 @@ getPathToTools() {
         }
     }
 
+    if (!path.empty()) {
+        if (llvm::sys::fs::is_directory(path)) {
+            llvm::sys::path::append(path, "xcrun");
+        }
+        if (llvm::sys::path::is_relative(path)) {
+           llvm::sys::fs::make_absolute(path);
+        }
+    }
+
     return path;
 }
 

@@ -22,54 +22,6 @@
 
 namespace llair {
 
-namespace {
-
-llvm::SmallString<256> &
-pathToLibraryTool() {
-    static llvm::SmallString<256> s_pathToLibraryTool;
-    return s_pathToLibraryTool;
-}
-
-} // namespace
-
-void
-setPathToLibraryTool(llvm::StringRef path) {
-    llvm::sys::path::native(path, pathToLibraryTool());
-}
-
-llvm::SmallString<256>
-getPathToLibraryTool() {
-    llvm::SmallString<256> path;
-
-    // Is the path set via setPathToLibraryTool()?
-    path = pathToLibraryTool();
-
-    // Is the path set via an environment variable?
-    if (path.empty()) {
-        auto tmp = llvm::sys::Process::GetEnv("LLAIR_LIBRARY_TOOL_PATH");
-        if (tmp) {
-            llvm::sys::path::native(*tmp, path);
-        }
-    }
-
-    // Is the tools path set?
-    if (path.empty()) {
-        auto tmp = getPathToTools();
-        if (llvm::sys::fs::is_directory(tmp)) {
-            path = tmp;
-            llvm::sys::path::append(path, "air-lld");
-            //llvm::sys::path::append(path, "metallib");
-        }
-    }
-
-    // Make the path absolute:
-    if (!path.empty() && llvm::sys::path::is_relative(path)) {
-        llvm::sys::fs::make_absolute(path);
-    }
-
-    return path;
-}
-
 std::unique_ptr<llvm::Module>
 finalizeLibrary(const Module& module) {
 #if LLVM_VERSION_MAJOR >= 8
@@ -168,10 +120,10 @@ finalizeLibraryForLLD(const Module& module) {
 
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
 makeLibraryWithLLD(const llvm::Module &module) {
-    auto path     = getPathToLibraryTool();
+    auto path     = getPathToTools();
     auto filename = llvm::sys::path::filename(path).str();
 
-    llvm::ArrayRef<std::string> args = {filename.data(), "--macos_version_min", "14.0", "-o", "-", "/dev/stdin"};
+    llvm::ArrayRef<std::string> args = {filename.data(), "air-lld", "--macos_version_min", "14.0", "-o", "-", "/dev/stdin"};
 
 #if LLVM_VERSION_MAJOR >= 12
     auto program = llvm::errorOrToExpected(openProgram((std::string)path, args));
