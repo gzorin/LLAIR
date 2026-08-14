@@ -53,7 +53,7 @@ Only `Module::getOrLoadClassFromABI` and `getOrLoadAllClassesFromABI` are actual
 
 This retraction reopens the justification in *Reversals and amendments* below.
 
-## A1 — Restore source-module immutability
+## A1 — Restore source-module immutability — DONE (2026-08-14)
 
 `MapMetadata(..., RF_ReuseAndMutateDistinctMDs, ...)` in the global-variable loop remaps *distinct* MDNodes in place rather than cloning. Distinct nodes are most of debug info. The pre-13 branch uses `RF_MoveDistinctMDs`, the same behavior under the old name, so this has always been the case.
 
@@ -64,6 +64,8 @@ Consequence: after linking, the source module's debug metadata points at values 
 Audit in the same pass: `MapValue` for the alias aliasee and the personality function omit `TMap.get()`, so their types are not remapped; aliases are created with `I->getValueType()` rather than `TMap->remapType(...)`.
 
 **Gate.** Link module A into two separate destinations. A's `NamedMDNode` operands and `DISubprogram` scope pointers are identical before and after both links. Keep as a regression test — it protects every later milestone in both series.
+
+**Gate result.** Landed in `lib/Linker/Linker.cpp`: both `RF_ReuseAndMutateDistinctMDs`/`RF_MoveDistinctMDs` branches now pass `RF_None`; the three audited omissions (alias aliasee, personality function, alias creation's value type) now go through `TMap.get()` / `TMap->remapType(...)`. The gate is now a permanent regression test in `examples/command-line/test.cpp` (`testLinkerPreservesSourceModuleDebugInfo`), the only test entry point this library has (no gtest harness here, unlike the parent Bourbon repo). It builds a source module with a `GlobalVariable` carrying a `DIGlobalVariableExpression` (a distinct node with a scope pointer — function-level `DISubprogram` cloning already goes through LLVM's own `CloneFunctionInto`, confirmed via `extsrc/llvm`'s `CloneFunction.cpp` to already pass `RF_None` for cross-module clones, so it doesn't exercise this bug), links it into two independent destinations, and asserts both that the source's own metadata is untouched *and* — the part that actually discriminates, since nothing in this graph has an operand that changes under remapping — that each destination gets its own clone rather than sharing identity with the source or with each other. Verified the test fails (`dst1_gv_expr != gv_expr` assertion trips) with `RF_ReuseAndMutateDistinctMDs` reinstated, and passes with the fix. Wired `LLAIRLinker` (and the `transformutils` LLVM component it needs) into the `llair-test` build target. Full rebuild of `extsrc/llair` (`llair-test`, `llair-link`, `llair-metallib`, `llair-dump`, `metalc`, `make-library`, `llair-triangle`) succeeds with no new warnings.
 
 ## A2 — ODR dedup for already-defined symbols
 

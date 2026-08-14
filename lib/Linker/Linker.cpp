@@ -355,7 +355,7 @@ Linker::linkModule(const Module *src) {
 
     // Loop over the aliases in the module
     for (llvm::Module::const_alias_iterator I = M->alias_begin(), E = M->alias_end(); I != E; ++I) {
-        auto *GA = GlobalAlias::create(I->getValueType(), I->getType()->getPointerAddressSpace(),
+        auto *GA = GlobalAlias::create(TMap->remapType(I->getValueType()), I->getType()->getPointerAddressSpace(),
                                        I->getLinkage(), I->getName(), New);
         GA->copyAttributesFrom(&*I);
         VMap[&*I] = GA;
@@ -383,9 +383,9 @@ Linker::linkModule(const Module *src) {
         I->getAllMetadata(MDs);
         for (auto MD : MDs)
 #if LLVM_VERSION_MAJOR >= 13
-            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_ReuseAndMutateDistinctMDs, TMap.get()));
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_None, TMap.get()));
 #else
-            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs, &TMap));
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_None, &TMap));
 #endif
 
         copyComdat(GV, &*I);
@@ -413,7 +413,7 @@ Linker::linkModule(const Module *src) {
 #endif
 
         if (I.hasPersonalityFn())
-            F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap));
+            F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap, RF_None, TMap.get()));
 
         copyComdat(F, &I);
 
@@ -426,7 +426,7 @@ Linker::linkModule(const Module *src) {
     for (llvm::Module::const_alias_iterator I = M->alias_begin(), E = M->alias_end(); I != E; ++I) {
         GlobalAlias *GA = cast<GlobalAlias>(VMap[&*I]);
         if (const Constant *C = I->getAliasee())
-            GA->setAliasee(MapValue(C, VMap));
+            GA->setAliasee(MapValue(C, VMap, RF_None, TMap.get()));
     }
 
     // And named metadata....
