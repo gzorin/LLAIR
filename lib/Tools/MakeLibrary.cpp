@@ -6,6 +6,7 @@
 
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
@@ -33,6 +34,8 @@ finalizeLibrary(const Module& module) {
     if (auto class_md = finalized_module->getNamedMetadata("llair.class"); class_md) {
         finalized_module->eraseNamedMetadata(class_md);
     }
+
+    llvm::StripDebugInfo(*finalized_module);
 
     llvm::legacy::FunctionPassManager fpm(finalized_module.get());
 

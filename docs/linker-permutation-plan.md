@@ -25,7 +25,7 @@ The two series share two components — a reachability walk and a permutation ke
 
 ## Reversals and amendments
 
-- **Re-enterable worklist, original justification withdrawn.** Earlier reasoning held that `finalizeInterfaces` created roots *after* linking, so a single upfront reachability pass could not be correct. `Class`/`Dispatcher`/`Interface` are dead experimental code, so that argument is void: the root set is knowable before the pull begins. A5 still specifies a re-enterable worklist on the weaker justification that interactive rebinding of a variation point should not require restarting the link. If that does not matter in practice, single-pass reachability is simpler and should win.
+- **Re-enterable worklist, original justification withdrawn — withdrawal itself withdrawn (2026-08-14).** Earlier reasoning held that `finalizeInterfaces` created roots *after* linking, so a single upfront reachability pass could not be correct. That was withdrawn on the premise that `Class`/`Dispatcher`/`Interface` are dead experimental code. The premise is false — see A0, retracted: `finalizeInterfaces` is live and does call `linkModules` again after the initial link, from all three CLI tools' `main()`. The original justification stands: the root set is not fully knowable before the pull begins, so A5's re-enterable worklist is not just a nicety for interactive rebinding — it may be load-bearing.
 - **Upfront inter-module dependency graph, not adopted.** Eager edge discovery walks every instruction of every registered module; lazy discovery walks only what is retained. The *symbol* index (A4) is eager because it is a `global_values()` pass with no instruction walking; edges stay lazy.
 - **Permutation key moves from library level to entry-point level.** A6 originally keyed a whole linked module. B3 splits libraries to one entry point each, which makes the natural key the reachable subgraph feeding a single entry. Editing a BRDF then invalidates the fragment entry only. A6 is restated accordingly.
 
@@ -43,15 +43,15 @@ The two series share two components — a reachability walk and a permutation ke
 
 # Series A — Linker
 
-## A0 — Delete dead abstract-interface machinery
+## A0 — Delete dead abstract-interface machinery — RETRACTED (2026-08-14)
 
-*Implementer's choice whether to take this; recommended, and it shrinks what A3 must relocate.*
+*Retracted: the premise was checked against the source tree and is false.*
 
-`Class`, `Dispatcher`, `Interface` are unused experimental scaffolding. Removal touches: `finalizeInterfaces` and its `getKindForClass` callback; `Module::getAllInterfacesFromABI`, `getOrLoadClassFromABI`, `getOrLoadAllClassesFromABI`, `getClass`, `d_class_symbol_table`, `d_dispatchers`, `d_dispatchers_by_interface`; the `llair.class` / `llair.dispatcher` blocks in `syncMetadata()`; `InterfaceKeyInfo` and `d_interfaces` in `LLAIRContextImpl`; the `ItaniumDemangle` dependency and the `DefaultAllocator` / `parseClassPathAndMethodName` / `getSelfType` helpers in `Module.cpp`. Also the `llair.class` erasure in both `finalizeLibrary` and `finalizeLibraryForLLD`.
+`Class`, `Dispatcher`, `Interface` are **not** dead. `Module::getAllInterfacesFromABI` is called from `main()` in all three CLI tools (`llair-metallib`, `llair-link`, `llair-dump`), feeding `finalizeInterfaces` (`lib/Linker/Linker.cpp:71-129`), which builds real `Dispatcher` objects and links a synthesized dispatcher module back into the output via a second `linkModules` call — i.e. it creates new roots *after* the initial link, in production tool paths. `InterfaceKeyInfo`/`d_interfaces` in `LLAIRContextImpl` are likewise exercised, via `Interface::get`.
 
-Harvest before deleting: `getSelfType`'s use of `PointerType::getElementType()` is the module's only hard dependence on typed pointers. Record in a design note that the replacement under opaque pointers is a name lookup into the canonical struct table (A3), not a type-graph walk.
+Only `Module::getOrLoadClassFromABI` and `getOrLoadAllClassesFromABI` are actually unreferenced anywhere in the tree. Everything else this milestone proposed removing — `finalizeInterfaces`, `getAllInterfacesFromABI`, `parseClassPathAndMethodName`, `getSelfType`, `ItaniumDemangle`, `d_interfaces` — is live. Deleting just the two dead functions would be a much smaller, independent cleanup, not this milestone as scoped.
 
-**Gate.** Library builds with no references to removed symbols; existing tests pass.
+This retraction reopens the justification in *Reversals and amendments* below.
 
 ## A1 — Restore source-module immutability
 
@@ -185,15 +185,15 @@ The payoff is upstream of everything else here — the cheapest link is the one 
 
 `WriteMetalLibToFile` is treated as a fixed, unmodifiable container assembler. Every milestone changes what llair hands it.
 
-## B1 — Strip debug info before packaging
+## B1 — Strip debug info before packaging — DONE (2026-08-14)
 
 `WriteMetalLibToFile` gates a large branch on `M.debug_compile_units_begin() != M.debug_compile_units_end()`. If any `DICompileUnit` survives `finalizeLibrary`, then per call it constructs a full `ValueEnumerator140` over the module solely to walk its metadata map for `DIFile` nodes and discards it; reads every referenced source file from disk; embeds all that source text into a `recompile_info` node; builds a tar archive and bz2-compresses it; and writes a second complete bitcode file to the filesystem at `<source>.air`.
 
 Filesystem I/O and bz2 compression per permutation, none of it consumed by Bourbon.
 
-**Decided.** `finalizeLibrary` calls `llvm::StripDebugInfo` before the module reaches `makeLibrary`. **Implementer's choice** whether this is unconditional or a flag defaulting to on — a debug-info-bearing metallib is genuinely useful under Xcode's GPU debugger, just never in the interactive loop.
+**Decided.** `finalizeLibrary` calls `llvm::StripDebugInfo` before the module reaches `makeLibrary`. Implemented unconditionally (`lib/Tools/MakeLibrary.cpp`), not flag-gated: nothing in the codebase consumes a debug-info-preserving option today, and `llair-metallib.cpp` has no CLI flag for it, so a bool parameter would be a speculative extension point. Add one later if a debug-info-preserving path is actually needed for Xcode's GPU debugger.
 
-**Gate, and do this one first.** Instrument the predicate before changing anything. If it is false on Bourbon's IR today, this milestone is a no-op and Series B reranks around B2. If it is true, measure `makeLibrary` wall time before and after — expect this to dominate everything else in both series.
+**Gate result.** Instrumented the predicate first, without needing to run the interactive renderer: disassembled all 98 `.bc` files produced by the current build (Metal-compiled shader sources plus MaterialX BXDF/pattern-generated bitcode) and found none carry a `DICompileUnit`; no `-g` flag exists anywhere in `cmake/modules/metal.cmake`. The predicate is false on Bourbon's IR today, so this landed as a correctness/future-proofing fix rather than a measured performance win — the doc's own anticipated outcome. Series B should rerank around B2 next. Verified: `libLLAIRTools`/`BourbonCore`/`llair-metallib` rebuild and relink cleanly, all existing tests (174 GoogleTest cases plus `tg-test`/`future-test`) pass, and `llair-metallib` still produces a valid `.metallib` end-to-end.
 
 ## B2 — Calibrate the optimization pipeline
 
@@ -255,7 +255,7 @@ Rendered-image comparison is the backstop and the weakest signal: a duplicated `
 
 ## Ordering
 
-B1 first, before anything else in either series — it is one call, and its outcome determines whether Series B or Series A dominates. B2 and B4's gates are measurements that should also precede the milestones they inform. A0–A4 are independent of both series' outcomes and can proceed in parallel.
+B1 first, before anything else in either series — it is one call, and its outcome determines whether Series B or Series A dominates. **Done (2026-08-14): predicate was false on Bourbon's real IR, so B1 did not resolve that question — move to B2 next.** B2 and B4's gates are measurements that should also precede the milestones they inform. A0 is retracted (see above); A1–A4 are independent of both series' outcomes and can proceed in parallel.
 
 ## Risks
 
