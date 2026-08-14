@@ -58,6 +58,12 @@ copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
     Dst->setComdat(DC);
 }
 
+constexpr bool
+isODR(llvm::GlobalValue::LinkageTypes L) {
+    return L == llvm::GlobalValue::LinkOnceODRLinkage ||
+           L == llvm::GlobalValue::WeakODRLinkage;
+}
+
 } // namespace
 
 void
@@ -285,30 +291,59 @@ Linker::linkModule(const Module *src) {
     // new module.  Here we add them to the VMap and to the new Module.  We
     // don't worry about attributes or initializers, they will come later.
     //
+    SmallVector<std::pair<const GlobalVariable *, GlobalVariable *>, 32> pending_globals;
+
     for (llvm::Module::const_global_iterator I = M->global_begin(), E = M->global_end(); I != E;
          ++I) {
         if (I->getName() == "llvm.global_ctors") {
             continue;
         }
 
-        GlobalVariable *GV = nullptr;
-
         if (I->isDeclaration()) {
+            GlobalVariable *GV = nullptr;
+
             auto it = src_to_dst_global_value_map.find(&*I);
             if (it != src_to_dst_global_value_map.end()) {
                 GV = llvm::cast<GlobalVariable>(it->second);
             }
+
+            if (!GV) {
+                GV = new GlobalVariable(*New, TMap->remapType(I->getValueType()), I->isConstant(),
+                                        I->getLinkage(), (Constant *)nullptr, I->getName(),
+                                        (GlobalVariable *)nullptr, I->getThreadLocalMode(),
+                                        I->getType()->getAddressSpace());
+                GV->copyAttributesFrom(&*I);
+            }
+
+            VMap[&*I] = GV;
+            continue;
         }
 
-        if (!GV) {
+        GlobalVariable *GV = New->getGlobalVariable(I->getName());
+
+        if (GV && !GV->isDeclaration()) {
+            if (GV->getLinkage() == GlobalValue::AvailableExternallyLinkage) {
+                // dst's initializer is a stand-in; src's real definition wins.
+                GV->setInitializer(nullptr);
+            }
+            else {
+                // ODR: initializers are equivalent, keep dst's. Anything src's
+                // initializer reached is already reachable through dst's.
+                assert(isODR(I->getLinkage()) && isODR(GV->getLinkage()));
+                VMap[&*I] = GV;
+                continue;                            // no copyAttributesFrom: would stomp dst's
+            }
+        }
+        else {
             GV = new GlobalVariable(*New, TMap->remapType(I->getValueType()), I->isConstant(),
                                     I->getLinkage(), (Constant *)nullptr, I->getName(),
                                     (GlobalVariable *)nullptr, I->getThreadLocalMode(),
                                     I->getType()->getAddressSpace());
-            GV->copyAttributesFrom(&*I);
         }
 
+        GV->copyAttributesFrom(&*I);
         VMap[&*I] = GV;
+        pending_globals.emplace_back(&*I, GV);
     }
 
     // Loop over the function declarations:
@@ -337,6 +372,8 @@ Linker::linkModule(const Module *src) {
     }
 
     // Loop over function definitions:
+    SmallVector<std::pair<const Function *, Function *>, 32> pending_bodies;
+
     for (const Function &I : *M) {
         if (I.isDeclaration()) {
             continue;
@@ -344,13 +381,28 @@ Linker::linkModule(const Module *src) {
 
         Function *NF = New->getFunction(I.getName());
 
-        if (!NF || !NF->isDeclaration()) {
+        if (NF && !NF->isDeclaration()) {
+            if (NF->getLinkage() == GlobalValue::AvailableExternallyLinkage) {
+                // dst's body is a stand-in; src's real definition wins.
+                NF->deleteBody();
+            }
+            else {
+                // ODR: bodies are equivalent, keep dst's. Anything src's body
+                // reached is already reachable through dst's.
+                assert(isODR(I.getLinkage()) && isODR(NF->getLinkage()));
+                VMap[&I] = NF;
+                continue;                       // no copyAttributesFrom: would stomp dst's
+            }
+        }
+
+        if (!NF) {
             NF = Function::Create(cast<FunctionType>(TMap->remapType(I.getValueType())),
                                   I.getLinkage(), I.getName(), New);
         }
 
         NF->copyAttributesFrom(&I);
         VMap[&I] = NF;
+        pending_bodies.emplace_back(&I, NF);
     }
 
     // Loop over the aliases in the module
@@ -365,16 +417,7 @@ Linker::linkModule(const Module *src) {
     // have been created, loop through and copy the global variable referrers
     // over...  We also set the attributes on the global now.
     //
-    for (llvm::Module::const_global_iterator I = M->global_begin(), E = M->global_end(); I != E;
-         ++I) {
-        if (I->getName() == "llvm.global_ctors") {
-            continue;
-        }
-
-        if (I->isDeclaration())
-            continue;
-
-        GlobalVariable *GV = cast<GlobalVariable>(VMap[&*I]);
+    for (auto &[I, GV] : pending_globals) {
         if (I->hasInitializer()) {
             GV->setInitializer(MapValue(I->getInitializer(), VMap, RF_None, TMap.get()));
         }
@@ -388,34 +431,29 @@ Linker::linkModule(const Module *src) {
             GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap, RF_None, &TMap));
 #endif
 
-        copyComdat(GV, &*I);
+        copyComdat(GV, I);
     }
 
     // Similarly, copy over function bodies now...
     //
-    for (const Function &I : *M) {
-        if (I.isDeclaration())
-            continue;
-
-        Function *F = cast<Function>(VMap[&I]);
-
+    for (auto &[I, F] : pending_bodies) {
         Function::arg_iterator DestI = F->arg_begin();
-        for (Function::const_arg_iterator J = I.arg_begin(); J != I.arg_end(); ++J) {
+        for (Function::const_arg_iterator J = I->arg_begin(); J != I->arg_end(); ++J) {
             DestI->setName(J->getName());
             VMap[&*J] = &*DestI++;
         }
 
         SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
 #if LLVM_VERSION_MAJOR >= 13
-        CloneFunctionInto(F, &I, VMap, CloneFunctionChangeType::DifferentModule, Returns, "", nullptr, TMap.get());
+        CloneFunctionInto(F, I, VMap, CloneFunctionChangeType::DifferentModule, Returns, "", nullptr, TMap.get());
 #else
-        CloneFunctionInto(F, &I, VMap, /*ModuleLevelChanges=*/true, Returns, "", nullptr, &TMap);
+        CloneFunctionInto(F, I, VMap, /*ModuleLevelChanges=*/true, Returns, "", nullptr, &TMap);
 #endif
 
-        if (I.hasPersonalityFn())
-            F->setPersonalityFn(MapValue(I.getPersonalityFn(), VMap, RF_None, TMap.get()));
+        if (I->hasPersonalityFn())
+            F->setPersonalityFn(MapValue(I->getPersonalityFn(), VMap, RF_None, TMap.get()));
 
-        copyComdat(F, &I);
+        copyComdat(F, I);
 
         if (F->hasSection() && F->getSection() == "air.static_init") {
             appendToGlobalCtors(*New, F, 65535);

@@ -3,12 +3,17 @@
 #include <llair/Linker/Linker.h>
 
 #include <llvm/BinaryFormat/Dwarf.h>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
 
 #include <cassert>
 #include <iostream>
@@ -93,6 +98,101 @@ testLinkerPreservesSourceModuleDebugInfo() {
     std::cerr << "testLinkerPreservesSourceModuleDebugInfo: OK" << std::endl;
 }
 
+llvm::Function *
+createSimpleFunction(llvm::Module &module, llvm::StringRef name,
+                     llvm::GlobalValue::LinkageTypes linkage) {
+    auto *fn_ty = llvm::FunctionType::get(llvm::Type::getVoidTy(module.getContext()), false);
+    auto *fn    = llvm::Function::Create(fn_ty, linkage, name, module);
+
+    auto *bb = llvm::BasicBlock::Create(module.getContext(), "entry", fn);
+    llvm::ReturnInst::Create(module.getContext(), bb);
+
+    return fn;
+}
+
+// Regression test for A2 (docs/linker-permutation-plan.md): linkModule() must
+// deduplicate an already-defined ODR symbol instead of blindly creating a new
+// GlobalValue and letting the module's symbol table rename it to "name.1".
+// Metal header-inlined linkonce_odr functions and constant tables are
+// redefined by every source module that includes the header, so relinking
+// several such modules into one destination hits this path every time.
+void
+testLinkerDedupesODRDefinitions() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    auto build_source = [&](llvm::StringRef module_name, llvm::StringRef unique_name) {
+        auto module = std::make_unique<llair::Module>(module_name, context);
+        auto *m     = module->getLLModule();
+
+        // Shared, header-inlined helper -- redefined by every source module:
+        createSimpleFunction(*m, "helper", llvm::GlobalValue::LinkOnceODRLinkage);
+
+        // Module-unique function:
+        createSimpleFunction(*m, unique_name, llvm::GlobalValue::ExternalLinkage);
+
+        // Shared, header-inlined constant table -- same shape, for globals:
+        auto *i32_ty = llvm::Type::getInt32Ty(llcontext);
+        new llvm::GlobalVariable(*m, i32_ty, true, llvm::GlobalValue::LinkOnceODRLinkage,
+                                 llvm::ConstantInt::get(i32_ty, 42), "table");
+
+        return module;
+    };
+
+    auto src1 = build_source("src1", "unique1");
+    auto src2 = build_source("src2", "unique2");
+
+    llair::Module dst("dst_odr", context);
+    llair::linkModules(&dst, src1.get());
+    llair::linkModules(&dst, src2.get());
+
+    auto *dst_module = dst.getLLModule();
+
+    assert(dst_module->getFunction("helper"));
+    assert(!dst_module->getFunction("helper.1"));
+    assert(std::distance(dst_module->begin(), dst_module->end()) == 3); // helper, unique1, unique2
+
+    assert(dst_module->getGlobalVariable("table"));
+    assert(!dst_module->getNamedValue("table.1"));
+    assert(std::distance(dst_module->global_begin(), dst_module->global_end()) == 1);
+
+    assert(!llvm::verifyModule(*dst_module));
+
+    std::cerr << "testLinkerDedupesODRDefinitions: OK" << std::endl;
+}
+
+// Regression test for A2's decided exception: an available_externally
+// definition in dst is a stand-in, not a real one, so a later source
+// module's real definition must replace it rather than being deduped away
+// or renamed alongside it.
+void
+testLinkerPrefersRealDefinitionOverAvailableExternally() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    llair::Module stand_in_src("stand_in", context);
+    createSimpleFunction(*stand_in_src.getLLModule(), "f", llvm::GlobalValue::AvailableExternallyLinkage);
+
+    llair::Module real_src("real", context);
+    createSimpleFunction(*real_src.getLLModule(), "f", llvm::GlobalValue::ExternalLinkage);
+
+    llair::Module dst("dst_ae", context);
+    llair::linkModules(&dst, &stand_in_src);
+    llair::linkModules(&dst, &real_src);
+
+    auto *dst_module = dst.getLLModule();
+    auto *f          = dst_module->getFunction("f");
+
+    assert(f);
+    assert(!dst_module->getFunction("f.1"));
+    assert(f->getLinkage() == llvm::GlobalValue::ExternalLinkage);
+    assert(!f->isDeclaration());
+
+    assert(!llvm::verifyModule(*dst_module));
+
+    std::cerr << "testLinkerPrefersRealDefinitionOverAvailableExternally: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -109,4 +209,6 @@ main(int argc, const char **argv) {
 #endif
 
     testLinkerPreservesSourceModuleDebugInfo();
+    testLinkerDedupesODRDefinitions();
+    testLinkerPrefersRealDefinitionOverAvailableExternally();
 }
