@@ -1,0 +1,178 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+
+    "configurePresets": [
+        {
+            "name": "llair-base",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+
+        {
+            "name": "macos",
+            "displayName": "LLAIR — macOS (Ninja)",
+            "inherits": "llair-base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-macos",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-macos/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "macos-release",
+            "displayName": "LLAIR — macOS Release (Ninja)",
+            "inherits": "llair-base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-macos-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-macos/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "macos-xcode",
+            "displayName": "LLAIR — macOS (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-macos-xcode",
+            "cacheVariables": {
+                "LLVM_DIR": "${sourceDir}/../../build-deps-macos/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "ios",
+            "displayName": "LLAIR — iOS (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-ios",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-ios/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "ios-sim",
+            "displayName": "LLAIR — iOS Simulator (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-ios-sim",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_SYSROOT": "iphonesimulator",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-ios-sim/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "visionos",
+            "displayName": "LLAIR — visionOS (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-visionos",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "visionOS",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "2.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-visionos/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "tvos",
+            "displayName": "LLAIR — tvOS (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-tvos",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "tvOS",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-tvos/install/lib/cmake/llvm"
+            }
+        },
+
+        {
+            "name": "tvos-sim",
+            "displayName": "LLAIR — tvOS Simulator (Xcode)",
+            "inherits": "llair-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/build-tvos-sim",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "tvOS",
+                "CMAKE_OSX_SYSROOT": "appletvsimulator",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+                "LLVM_DIR": "${sourceDir}/../../build-deps-tvos-sim/install/lib/cmake/llvm"
+            }
+        }
+    ],
+
+    "buildPresets": [
+        {
+            "name": "macos",
+            "displayName": "Build — macOS (Debug)",
+            "configurePreset": "macos"
+        },
+        {
+            "name": "macos-release",
+            "displayName": "Build — macOS (Release)",
+            "configurePreset": "macos-release"
+        },
+        {
+            "name": "macos-xcode",
+            "displayName": "Build — macOS Xcode (Debug)",
+            "configurePreset": "macos-xcode",
+            "configuration": "Debug"
+        },
+        {
+            "name": "macos-xcode-release",
+            "displayName": "Build — macOS Xcode (Release)",
+            "configurePreset": "macos-xcode",
+            "configuration": "Release"
+        },
+        {
+            "name": "ios",
+            "displayName": "Build — iOS (Release)",
+            "configurePreset": "ios",
+            "configuration": "Release"
+        },
+        {
+            "name": "ios-sim",
+            "displayName": "Build — iOS Simulator (Debug)",
+            "configurePreset": "ios-sim",
+            "configuration": "Debug"
+        },
+        {
+            "name": "visionos",
+            "displayName": "Build — visionOS (Release)",
+            "configurePreset": "visionos",
+            "configuration": "Release"
+        },
+        {
+            "name": "tvos",
+            "displayName": "Build — tvOS (Release)",
+            "configurePreset": "tvos",
+            "configuration": "Release"
+        },
+        {
+            "name": "tvos-sim",
+            "displayName": "Build — tvOS Simulator (Debug)",
+            "configurePreset": "tvos-sim",
+            "configuration": "Debug"
+        }
+    ]
+}

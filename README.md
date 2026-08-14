@@ -7,7 +7,23 @@ LLAIR specifies a few classes that model the parts of the Metal intermediate rep
 
 The function 'llair::Tools::compileBuffer()' accepts a string containing source code in the Metal Shading Language and returns a new 'llair::Module'. The function 'llair::Tools::makeLibrary()' accepts a reference to a 'llair::Module' and returns a buffer that can be passed to the MTLDevice function 'newLibraryWithData'. Both functions are implemented by running some of the Metal command-line utilities distributed with Xcode (respectively, the 'metal' and 'metallib' utilities).
 
-This project requires [this fork of LLVM][1], which is itself based on [another fork developed by Florian Ziesche][2]; among other things, that project provides the capability to emit (and disassemble) valid '.metallib' files from the application itself, & without invoking `air-lld` as a child process. The environment variable 'LLVM_DIR' should be set to the location of the LLVM distribution's 'LLVMConfig.cmake' when running 'cmake'.
+This project requires [this fork of LLVM][1], which is itself based on [another fork developed by Florian Ziesche][2]; among other things, that project provides the capability to emit (and disassemble) valid '.metallib' files from the application itself, & without invoking `air-lld` as a child process. The variable 'LLVM_DIR' should be set to the location of the LLVM distribution's 'LLVMConfig.cmake' when running 'cmake'.
+
+## Building
+
+Use the CMake presets to configure and build against a prebuilt LLVM:
+
+```bash
+cmake --preset macos
+cmake --build --preset macos
+```
+
+Presets are also provided for `macos-release`, `macos-xcode`, `ios`,
+`ios-sim`, `visionos`, `tvos`, and `tvos-sim`. Each preset points `LLVM_DIR`
+at the matching platform's install under bourbon's `build-deps-<platform>/`
+(built via `deps/CMakePresets.json` in the parent bourbon project). Building
+without presets still works — just set `LLVM_DIR` yourself before running
+`cmake`.
 
 [1]: https://github.com/gzorin/floor_llvm
 [2]: https://github.com/a2flo/floor_llvm
