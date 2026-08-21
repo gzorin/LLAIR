@@ -1,3 +1,4 @@
+#include <llair/IR/EntryPoint.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
@@ -9,14 +10,24 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Pass.h>
+#include <llvm/Transforms/IPO.h>
 
+#include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <set>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -323,6 +334,230 @@ testModuleSymbolIndexMatchesBruteForceScan() {
     std::cerr << "testModuleSymbolIndexMatchesBruteForceScan: OK" << std::endl;
 }
 
+// Corpus shared by the A5 pull tests. Module A defines `entry` (which calls
+// `helper` and references global `g` through a ConstantExpr) but only declares
+// `helper`/`g`; it also defines a linkonce_odr `shared` and an air.static_init
+// `ctor` that calls `shared`. Module B defines `helper`, `g`, a `dead_fn` that
+// nothing references, and its own linkonce_odr `shared`.
+struct PullCorpus {
+    std::unique_ptr<llair::Module> a, b;
+};
+
+PullCorpus
+buildPullCorpus(llair::LLAIRContext &context) {
+    auto &llctx = context.getLLContext();
+
+    auto A  = std::make_unique<llair::Module>("pull_A", context);
+    auto B  = std::make_unique<llair::Module>("pull_B", context);
+    auto *mA = A->getLLModule();
+    auto *mB = B->getLLModule();
+
+    auto *i32      = llvm::Type::getInt32Ty(llctx);
+    auto *i64      = llvm::Type::getInt64Ty(llctx);
+    auto *void_fn  = llvm::FunctionType::get(llvm::Type::getVoidTy(llctx), false);
+
+    // Module A: declarations of B's definitions, plus entry/shared/ctor.
+    auto *g_decl      = new llvm::GlobalVariable(*mA, i32, false,
+                                                 llvm::GlobalValue::ExternalLinkage, nullptr, "g");
+    auto *helper_decl = llvm::Function::Create(void_fn, llvm::GlobalValue::ExternalLinkage,
+                                               "helper", mA);
+
+    auto *entry = llvm::Function::Create(void_fn, llvm::GlobalValue::ExternalLinkage, "entry", mA);
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llctx, "entry", entry));
+        auto *slot = b.CreateAlloca(i64);
+        // Reference g only through a ConstantExpr, exercising the walk's descent.
+        b.CreateStore(llvm::ConstantExpr::getPtrToInt(g_decl, i64), slot);
+        b.CreateCall(helper_decl);
+        b.CreateRetVoid();
+    }
+
+    createSimpleFunction(*mA, "shared", llvm::GlobalValue::LinkOnceODRLinkage);
+
+    auto *ctor = llvm::Function::Create(void_fn, llvm::GlobalValue::InternalLinkage, "ctor", mA);
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llctx, "entry", ctor));
+        b.CreateCall(mA->getFunction("shared"));
+        b.CreateRetVoid();
+    }
+    ctor->setSection("air.static_init");
+
+    // Module B: real definitions.
+    createSimpleFunction(*mB, "helper", llvm::GlobalValue::ExternalLinkage);
+    new llvm::GlobalVariable(*mB, i32, false, llvm::GlobalValue::ExternalLinkage,
+                             llvm::ConstantInt::get(i32, 7), "g");
+    createSimpleFunction(*mB, "dead_fn", llvm::GlobalValue::ExternalLinkage);
+    createSimpleFunction(*mB, "shared", llvm::GlobalValue::LinkOnceODRLinkage);
+
+    return {std::move(A), std::move(B)};
+}
+
+// Register `entry` as a compute entry point on `module` and mirror it into
+// air.kernel named metadata, the form a bitcode load would carry.
+void
+materializeComputeEntryPoint(llair::Module &module) {
+    auto *entry = module.getLLModule()->getFunction("entry");
+    auto *ep    = llair::ComputeEntryPoint::Create(entry, &module);
+    module.getLLModule()->getOrInsertNamedMetadata("air.kernel")->addOperand(ep->metadata());
+}
+
+// A1 (mechanism): the pull path clones exactly the transitive closure of the
+// roots -- reaching a callee, a ConstantExpr-referenced global, an ODR helper
+// pulled through a ctor, and a static_init ctor -- while leaving dead code out.
+void
+testLinkerPullReachesRequiredClosure() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    auto corpus = buildPullCorpus(context);
+
+    llair::Module          dst("dst_pull_closure", context);
+    llair::LinkerTypeCache cache;
+    llair::Linker          linker(dst, cache);
+    linker.addModule(corpus.a.get());
+    linker.addModule(corpus.b.get());
+    linker.require("entry");
+    linker.resolve();
+    dst.syncMetadata();
+
+    auto *m = dst.getLLModule();
+
+    assert(m->getFunction("entry") && !m->getFunction("entry")->isDeclaration());
+    assert(m->getFunction("helper") && !m->getFunction("helper")->isDeclaration());
+    assert(m->getFunction("shared") && !m->getFunction("shared")->isDeclaration());
+    assert(m->getFunction("ctor") && !m->getFunction("ctor")->isDeclaration());
+
+    // Cross-module join: A declared g, B defined it; the pull wires B's initializer.
+    auto *g = m->getNamedGlobal("g");
+    assert(g && g->hasInitializer());
+
+    assert(!m->getFunction("dead_fn")); // unreachable -- never pulled
+
+    // A definition is pulled once and joined by name, so no ".1" rename occurs.
+    assert(!m->getNamedValue("shared.1"));
+    assert(!m->getNamedValue("helper.1"));
+
+    auto *ctors = m->getNamedGlobal("llvm.global_ctors");
+    assert(ctors && ctors->hasInitializer());
+    assert(llvm::cast<llvm::ConstantArray>(ctors->getInitializer())->getNumOperands() == 1);
+
+    assert(!llvm::verifyModule(*m));
+
+    std::cerr << "testLinkerPullReachesRequiredClosure: OK" << std::endl;
+}
+
+void
+pruneToRoots(llvm::Module &m, const std::set<std::string> &roots) {
+    llvm::legacy::PassManager mpm;
+    mpm.add(llvm::createInternalizePass([roots](const llvm::GlobalValue &gv) -> bool {
+        return roots.count(gv.getName().str()) == 1;
+    }));
+    mpm.add(llvm::createGlobalDCEPass());
+    mpm.run(m);
+}
+
+// Two modules compare equal modulo symbol ordering: same set of *defined* names
+// and the same function/global/alias counts. Linkage and metadata are ignored --
+// internalize rewrites the former and GlobalDCE nulls references in the latter.
+void
+assertSameShape(const llvm::Module *lhs, const llvm::Module *rhs) {
+    auto shape = [](const llvm::Module *m) {
+        std::vector<std::string> defined;
+        std::size_t              n_func = 0, n_global = 0, n_alias = 0;
+        for (const auto &f : *m) {
+            ++n_func;
+            if (!f.isDeclaration()) {
+                defined.push_back(f.getName().str());
+            }
+        }
+        for (const auto &g : m->globals()) {
+            ++n_global;
+            if (g.hasInitializer()) {
+                defined.push_back(g.getName().str());
+            }
+        }
+        for (const auto &a : m->aliases()) {
+            ++n_alias;
+            defined.push_back(a.getName().str());
+        }
+        std::sort(defined.begin(), defined.end());
+        return std::make_tuple(defined, n_func, n_global, n_alias);
+    };
+
+    assert(shape(lhs) == shape(rhs));
+    assert(!llvm::verifyModule(*lhs));
+    assert(!llvm::verifyModule(*rhs));
+}
+
+// A5's load-bearing differential gate: the pull must produce the same defined
+// symbols as the eager path followed by internalize(full root set)+GlobalDCE.
+void
+testLinkerPullMatchesEagerThenPrune() {
+    // The full pull root set for this corpus: the explicit require plus the
+    // auto-seeded air.static_init ctor. (No llvm.used here.)
+    const std::set<std::string> roots = {"entry", "ctor"};
+
+    // Variant 1: closure driven by an explicit require().
+    {
+        llvm::LLVMContext   llcontext;
+        llair::LLAIRContext context(llcontext);
+
+        // Link the definer (B) before the module that only declares its globals
+        // (A): the eager global loop joins a definition onto an existing dst
+        // declaration only in that order, so this is its correct-baseline order.
+        auto                   eager = buildPullCorpus(context);
+        llair::Module          dst_eager("dst_eager", context);
+        llair::LinkerTypeCache eager_cache;
+        llair::linkModules(&dst_eager, eager.b.get(), eager_cache);
+        llair::linkModules(&dst_eager, eager.a.get(), eager_cache);
+        pruneToRoots(*dst_eager.getLLModule(), roots);
+
+        auto                   pull = buildPullCorpus(context);
+        llair::Module          dst_pull("dst_pull", context);
+        llair::LinkerTypeCache pull_cache;
+        llair::Linker          linker(dst_pull, pull_cache);
+        linker.addModule(pull.a.get());
+        linker.addModule(pull.b.get());
+        linker.require("entry");
+        linker.resolve();
+        dst_pull.syncMetadata();
+
+        assertSameShape(dst_eager.getLLModule(), dst_pull.getLLModule());
+    }
+
+    // Variant 2: no explicit require -- the closure is driven by an auto-seeded
+    // entry-point root, and the copied air.kernel metadata rematerializes it.
+    {
+        llvm::LLVMContext   llcontext;
+        llair::LLAIRContext context(llcontext);
+
+        auto eager = buildPullCorpus(context);
+        materializeComputeEntryPoint(*eager.a);
+        llair::Module          dst_eager("dst_eager2", context);
+        llair::LinkerTypeCache eager_cache;
+        llair::linkModules(&dst_eager, eager.b.get(), eager_cache);
+        llair::linkModules(&dst_eager, eager.a.get(), eager_cache);
+        pruneToRoots(*dst_eager.getLLModule(), roots);
+
+        auto pull = buildPullCorpus(context);
+        materializeComputeEntryPoint(*pull.a);
+        llair::Module          dst_pull("dst_pull2", context);
+        llair::LinkerTypeCache pull_cache;
+        llair::Linker          linker(dst_pull, pull_cache);
+        linker.addModule(pull.a.get());
+        linker.addModule(pull.b.get());
+        linker.resolve();
+        dst_pull.syncMetadata();
+
+        assert(dst_pull.entry_point_begin() != dst_pull.entry_point_end());
+        assert(dst_pull.entry_point_begin()->getName() == "entry");
+
+        assertSameShape(dst_eager.getLLModule(), dst_pull.getLLModule());
+    }
+
+    std::cerr << "testLinkerPullMatchesEagerThenPrune: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -344,4 +579,6 @@ main(int argc, const char **argv) {
     testLinkerCanonicalizesStructsAcrossSeparateLinks();
     testLinkerHandlesSelfReferentialStructTypes();
     testModuleSymbolIndexMatchesBruteForceScan();
+    testLinkerPullReachesRequiredClosure();
+    testLinkerPullMatchesEagerThenPrune();
 }

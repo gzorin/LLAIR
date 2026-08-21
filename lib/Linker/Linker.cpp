@@ -8,9 +8,16 @@
 
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/STLFunctionalExtras.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalAlias.h>
+#include <llvm/IR/GlobalObject.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
@@ -67,6 +74,55 @@ constexpr bool
 isODR(llvm::GlobalValue::LinkageTypes L) {
     return L == llvm::GlobalValue::LinkOnceODRLinkage ||
            L == llvm::GlobalValue::WeakODRLinkage;
+}
+
+// Descend a use operand to the GlobalValue leaves it reaches: a GlobalValue is
+// a leaf; a MetadataAsValue roots no reachability (metadata must never root the
+// walk); any other Constant is descended through its operands, which carries the
+// walk through a ConstantExpr to the GlobalValue it names. This is the forward
+// (over operands, not users) analogue of GlobalDCE's dependency computation.
+void
+visitReferencedOperand(const llvm::Value *operand,
+                       llvm::function_ref<void(const llvm::GlobalValue &)> visit) {
+    if (auto *gv = llvm::dyn_cast<llvm::GlobalValue>(operand)) {
+        visit(*gv);
+        return;
+    }
+    if (llvm::isa<llvm::MetadataAsValue>(operand)) {
+        return;
+    }
+    if (auto *c = llvm::dyn_cast<llvm::Constant>(operand)) {
+        for (const auto &sub : c->operands()) {
+            visitReferencedOperand(sub.get(), visit);
+        }
+    }
+}
+
+// Every GlobalValue directly referenced by `root`'s definition: a function's
+// instruction operands, a global's initializer, an alias's aliasee. Attached
+// metadata and debug locations are deliberately never walked.
+void
+forEachReferencedGlobalValue(const llvm::GlobalValue &root,
+                             llvm::function_ref<void(const llvm::GlobalValue &)> visit) {
+    if (auto *f = llvm::dyn_cast<llvm::Function>(&root)) {
+        for (const auto &bb : *f) {
+            for (const auto &inst : bb) {
+                for (const auto &operand : inst.operands()) {
+                    visitReferencedOperand(operand.get(), visit);
+                }
+            }
+        }
+    }
+    else if (auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(&root)) {
+        if (gv->hasInitializer()) {
+            visitReferencedOperand(gv->getInitializer(), visit);
+        }
+    }
+    else if (auto *ga = llvm::dyn_cast<llvm::GlobalAlias>(&root)) {
+        if (const llvm::Constant *aliasee = ga->getAliasee()) {
+            visitReferencedOperand(aliasee, visit);
+        }
+    }
 }
 
 } // namespace
@@ -472,6 +528,262 @@ Linker::linkModule(const Module *src) {
 void
 Linker::syncMetadata() {
     d_dst.syncMetadata();
+}
+
+void
+Linker::addModule(const Module *src) {
+    d_modules.push_back(src);
+}
+
+void
+Linker::require(llvm::StringRef name) {
+    if (name.empty()) {
+        return;
+    }
+    if (d_enqueued.insert(name).second) {
+        d_worklist.push_back(name.str());
+    }
+}
+
+const llvm::GlobalValue *
+Linker::findDefinition(llvm::StringRef name) const {
+    for (auto *m : d_modules) {
+        if (auto *def = m->lookupDefinition(name)) {
+            return def;
+        }
+    }
+    return nullptr;
+}
+
+llvm::GlobalValue *
+Linker::declare(const llvm::GlobalValue *src) {
+    {
+        auto it = d_vmap.find(src);
+        if (it != d_vmap.end()) {
+            return cast<GlobalValue>(it->second);
+        }
+    }
+
+    auto New = d_dst.getLLModule();
+
+    // A src symbol already present in dst (a prior link, or a decl this pull
+    // created) is the join target; multiple src objects for one name share it.
+    if (auto *existing = New->getNamedValue(src->getName())) {
+        d_vmap[src] = existing;
+        return existing;
+    }
+
+    GlobalValue *dst = nullptr;
+
+    if (auto *gv = dyn_cast<GlobalVariable>(src)) {
+        auto *NGV = new GlobalVariable(*New, TMap->remapType(gv->getValueType()), gv->isConstant(),
+                                       gv->getLinkage(), (Constant *)nullptr, gv->getName(),
+                                       (GlobalVariable *)nullptr, gv->getThreadLocalMode(),
+                                       gv->getType()->getAddressSpace());
+        NGV->copyAttributesFrom(gv);
+        dst = NGV;
+    }
+    else if (auto *f = dyn_cast<Function>(src)) {
+        auto *NF = Function::Create(cast<FunctionType>(TMap->remapType(f->getValueType())),
+                                    f->getLinkage(), f->getName(), New);
+        NF->copyAttributesFrom(f);
+        dst = NF;
+    }
+    else {
+        auto *ga  = cast<GlobalAlias>(src);
+        auto *NGA = GlobalAlias::create(TMap->remapType(ga->getValueType()),
+                                        ga->getType()->getPointerAddressSpace(), ga->getLinkage(),
+                                        ga->getName(), New);
+        NGA->copyAttributesFrom(ga);
+        dst = NGA;
+    }
+
+    d_vmap[src] = dst;
+    return dst;
+}
+
+void
+Linker::define(const llvm::GlobalValue *src) {
+    auto New  = d_dst.getLLModule();
+    auto name = src->getName();
+
+    // A2 dedup, mirroring the eager path's decision for an already-defined name.
+    if (auto *existing = New->getNamedValue(name); existing && !existing->isDeclaration()) {
+        if (existing->getLinkage() == GlobalValue::AvailableExternallyLinkage) {
+            // dst's definition is a stand-in; src's real definition wins.
+            if (auto *egv = dyn_cast<GlobalVariable>(existing)) {
+                egv->setInitializer(nullptr);
+            }
+            else if (auto *ef = dyn_cast<Function>(existing)) {
+                ef->deleteBody();
+            }
+        }
+        else {
+            // ODR: definitions are equivalent, keep dst's. Anything src's reached
+            // is already reachable through dst's.
+            assert(isODR(src->getLinkage()) && isODR(existing->getLinkage()));
+            d_vmap[src] = existing;
+            d_resolved.insert(name);
+            return;
+        }
+    }
+
+    auto *dst = declare(src);
+
+    // Comdat is a source-module property, kept out of the reachability walk: pull
+    // every sibling in src's group so the comdat stays a unit.
+    if (auto *go = dyn_cast<GlobalObject>(src)) {
+        if (auto *comdat = go->getComdat()) {
+            for (const auto &sibling : go->getParent()->global_values()) {
+                if (auto *sgo = dyn_cast<GlobalObject>(&sibling); sgo && sgo->getComdat() == comdat) {
+                    require(sibling.getName());
+                }
+            }
+        }
+    }
+
+    // Declare every referenced GlobalValue before the clone (so RF_None resolves
+    // it in d_vmap rather than leaving the source object), and enqueue its real
+    // definition to be pulled later.
+    forEachReferencedGlobalValue(*src, [this](const llvm::GlobalValue &ref) {
+        declare(&ref);
+        require(ref.getName());
+    });
+
+    if (auto *gv = dyn_cast<GlobalVariable>(src)) {
+        auto *GV = cast<GlobalVariable>(dst);
+        GV->copyAttributesFrom(gv);
+        if (gv->hasInitializer()) {
+            GV->setInitializer(MapValue(gv->getInitializer(), d_vmap, RF_None, TMap.get()));
+        }
+
+        SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
+        gv->getAllMetadata(MDs);
+        for (auto MD : MDs) {
+            GV->addMetadata(MD.first, *MapMetadata(MD.second, d_vmap, RF_None, TMap.get()));
+        }
+
+        copyComdat(GV, gv);
+    }
+    else if (auto *f = dyn_cast<Function>(src)) {
+        auto *F = cast<Function>(dst);
+        F->copyAttributesFrom(f);
+
+        Function::arg_iterator DestI = F->arg_begin();
+        for (Function::const_arg_iterator J = f->arg_begin(); J != f->arg_end(); ++J) {
+            DestI->setName(J->getName());
+            d_vmap[&*J] = &*DestI++;
+        }
+
+        SmallVector<ReturnInst *, 8> Returns;
+        CloneFunctionInto(F, f, d_vmap, CloneFunctionChangeType::DifferentModule, Returns, "",
+                          nullptr, TMap.get());
+
+        if (f->hasPersonalityFn()) {
+            F->setPersonalityFn(MapValue(f->getPersonalityFn(), d_vmap, RF_None, TMap.get()));
+        }
+
+        copyComdat(F, f);
+
+        // Batched so llvm.global_ctors is built once in resolve(), not per ctor.
+        if (F->hasSection() && F->getSection() == "air.static_init") {
+            d_pending_ctors.push_back(F);
+        }
+    }
+    else {
+        auto *ga = cast<GlobalAlias>(src);
+        auto *GA = cast<GlobalAlias>(dst);
+        GA->copyAttributesFrom(ga);
+        if (const Constant *C = ga->getAliasee()) {
+            GA->setAliasee(MapValue(C, d_vmap, RF_None, TMap.get()));
+        }
+    }
+
+    d_resolved.insert(name);
+}
+
+void
+Linker::copyNamedMetadata() {
+    auto New = d_dst.getLLModule();
+
+    static const std::set<llvm::StringRef> s_once_metadata_names = {
+        "air.version", "air.language_version", "air.compile_options", "air.source_file_name",
+        "llvm.ident", "llvm.module.flags"};
+
+    // Copied wholesale under RF_None. air.vertex/fragment/kernel is safe because
+    // every entry point is a root and so resolves in d_vmap. This would assert if
+    // some other named-MD node referenced an un-pulled GlobalValue -- in practice
+    // only debug info (llvm.dbg.cu -> DISubprogram -> un-pulled fn), which no
+    // Bourbon link input carries. If debug info ever appears at link time, the
+    // non-entry/non-once nodes need a missing-tolerant map or a post-
+    // StripDebugInfo ordering; the eager path never hits this because it pulls
+    // everything.
+    for (auto *m : d_modules) {
+        auto M = m->getLLModule();
+        for (llvm::Module::const_named_metadata_iterator I = M->named_metadata_begin(),
+                                                         E = M->named_metadata_end();
+             I != E; ++I) {
+            const NamedMDNode &NMD    = *I;
+            NamedMDNode *      NewNMD = New->getOrInsertNamedMetadata(NMD.getName());
+
+            if (s_once_metadata_names.count(NMD.getName()) > 0 && NewNMD->getNumOperands() > 0) {
+                continue;
+            }
+
+            for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i) {
+                NewNMD->addOperand(MapMetadata(NMD.getOperand(i), d_vmap, RF_None, TMap.get()));
+            }
+        }
+    }
+}
+
+void
+Linker::resolve() {
+    auto New = d_dst.getLLModule();
+
+    // Seed roots from every registered module: entry points, llvm.used /
+    // llvm.compiler.used, and air.static_init constructors. Explicit require()s
+    // are already queued.
+    for (auto *m : d_modules) {
+        auto M = m->getLLModule();
+
+        for (auto I = m->entry_point_begin(), E = m->entry_point_end(); I != E; ++I) {
+            require(I->getFunction()->getName());
+        }
+
+        SmallVector<GlobalValue *, 8> used;
+        collectUsedGlobalVariables(*M, used, /*CompilerUsed=*/false);
+        collectUsedGlobalVariables(*M, used, /*CompilerUsed=*/true);
+        for (auto *gv : used) {
+            require(gv->getName());
+        }
+
+        for (const auto &f : M->functions()) {
+            if (f.hasSection() && f.getSection() == "air.static_init") {
+                require(f.getName());
+            }
+        }
+    }
+
+    // Drain: an unresolved name with no definition stays an external declaration,
+    // exactly as the eager path leaves an unresolved decl. Checking d_resolved at
+    // pop keeps resolve() re-enterable across require()+resolve() calls.
+    while (!d_worklist.empty()) {
+        std::string name = std::string(d_worklist.pop_back_val());
+        if (d_resolved.count(name) > 0) {
+            continue;
+        }
+        if (auto *def = findDefinition(name)) {
+            define(def);
+        }
+    }
+
+    for (auto *F : d_pending_ctors) {
+        appendToGlobalCtors(*New, F, 65535);
+    }
+    d_pending_ctors.clear();
+
+    copyNamedMetadata();
 }
 
 } // End namespace llair
