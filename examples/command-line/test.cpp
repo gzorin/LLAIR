@@ -558,6 +558,139 @@ testLinkerPullMatchesEagerThenPrune() {
     std::cerr << "testLinkerPullMatchesEagerThenPrune: OK" << std::endl;
 }
 
+// An i32()-returning function whose body is a single `ret <value>`, so distinct
+// `value`s give it distinct IR -- a stand-in for a variation point bound to
+// different definitions across permutations.
+llvm::Function *
+createReturningFunction(llvm::Module &module, llvm::StringRef name,
+                        llvm::GlobalValue::LinkageTypes linkage, int value) {
+    auto *i32   = llvm::Type::getInt32Ty(module.getContext());
+    auto *fn_ty = llvm::FunctionType::get(i32, false);
+    auto *fn    = llvm::Function::Create(fn_ty, linkage, name, module);
+
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(module.getContext(), "entry", fn));
+    b.CreateRet(llvm::ConstantInt::get(i32, value));
+
+    return fn;
+}
+
+// One permutation for the A6 key tests. A shape module declares two variation
+// points (`vbxdf`, `fbxdf`) and defines two entries plus a shared helper:
+// `vmain` reaches `vbxdf` and `common`; `fmain` reaches `fbxdf` and `common`.
+// Neither entry reaches the other's variation point. A defs module supplies the
+// chosen definitions, whose bodies are controlled by `vbxdf_value`/`fbxdf_value`.
+// `with_defs == false` leaves the frontier unbound, for the validation test.
+struct PermutationKeys {
+    uint64_t vmain = 0, fmain = 0;
+    bool     bound = false;
+};
+
+PermutationKeys
+buildPermutationKeys(int vbxdf_value, int fbxdf_value, bool with_defs = true) {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    auto  shape  = std::make_unique<llair::Module>("a6_shape", context);
+    auto *mShape = shape->getLLModule();
+
+    auto *i32     = llvm::Type::getInt32Ty(llcontext);
+    auto *i32_fn  = llvm::FunctionType::get(i32, false);
+    auto *void_fn = llvm::FunctionType::get(llvm::Type::getVoidTy(llcontext), false);
+
+    auto *vbxdf_decl =
+        llvm::Function::Create(i32_fn, llvm::GlobalValue::ExternalLinkage, "vbxdf", mShape);
+    auto *fbxdf_decl =
+        llvm::Function::Create(i32_fn, llvm::GlobalValue::ExternalLinkage, "fbxdf", mShape);
+
+    // Shared, non-varying code reachable from both entries: its content must not
+    // enter either key, since it is not a variation point.
+    auto *common = createReturningFunction(*mShape, "common",
+                                           llvm::GlobalValue::LinkOnceODRLinkage, 99);
+
+    auto build_entry = [&](llvm::StringRef name, llvm::Function *bxdf) {
+        auto *entry = llvm::Function::Create(void_fn, llvm::GlobalValue::ExternalLinkage, name,
+                                             mShape);
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", entry));
+        b.CreateCall(common);
+        b.CreateCall(bxdf);
+        b.CreateRetVoid();
+        return entry;
+    };
+    build_entry("vmain", vbxdf_decl);
+    build_entry("fmain", fbxdf_decl);
+
+    auto  defs  = std::make_unique<llair::Module>("a6_defs", context);
+    auto *mDefs = defs->getLLModule();
+    if (with_defs) {
+        createReturningFunction(*mDefs, "vbxdf", llvm::GlobalValue::ExternalLinkage, vbxdf_value);
+        createReturningFunction(*mDefs, "fbxdf", llvm::GlobalValue::ExternalLinkage, fbxdf_value);
+    }
+
+    llair::Module          dst("a6_dst", context);
+    llair::LinkerTypeCache cache;
+    llair::Linker          linker(dst, cache);
+    linker.addModule(shape.get());
+    linker.addModule(defs.get());
+    linker.addVariationPoint("vbxdf");
+    linker.addVariationPoint("fbxdf");
+    linker.require("vmain");
+    linker.require("fmain");
+    linker.resolve();
+    dst.syncMetadata();
+
+    auto *m = dst.getLLModule();
+    return {linker.permutationKey(m->getFunction("vmain")),
+            linker.permutationKey(m->getFunction("fmain")),
+            linker.variationPointsBound()};
+}
+
+// A6 gate (docs/linker-permutation-plan.md): the entry-level permutation key is
+// stable for equal bindings, changes when any reached binding changes, and is
+// isolated to the entry's reachable subgraph -- a fragment-only binding change
+// leaves the vertex key untouched and vice versa.
+void
+testPermutationKeyDiscriminatesBindings() {
+    // Gate 1: two independent constructions of the same binding set agree.
+    auto base  = buildPermutationKeys(1, 2);
+    auto again = buildPermutationKeys(1, 2);
+    assert(base.bound && again.bound);
+    assert(base.vmain == again.vmain);
+    assert(base.fmain == again.fmain);
+
+    // Gate 3: a change reaching only the fragment subgraph moves the fragment
+    // key but leaves the vertex key unchanged.
+    auto frag_changed = buildPermutationKeys(1, 3);
+    assert(frag_changed.fmain != base.fmain);
+    assert(frag_changed.vmain == base.vmain);
+
+    // Gate 2 (and the symmetric case of gate 3): a change reaching only the
+    // vertex subgraph moves the vertex key but leaves the fragment key unchanged.
+    auto vert_changed = buildPermutationKeys(4, 2);
+    assert(vert_changed.vmain != base.vmain);
+    assert(vert_changed.fmain == base.fmain);
+
+    // Distinct variation points make the two entries' keys differ even at equal
+    // bound values -- the folded name disambiguates them.
+    auto equal_values = buildPermutationKeys(5, 5);
+    assert(equal_values.vmain != equal_values.fmain);
+
+    std::cerr << "testPermutationKeyDiscriminatesBindings: OK" << std::endl;
+}
+
+// A6 validation: variationPointsBound() is true only once every declared point
+// has resolved to a definition; an unbound point (no defs module) reports false,
+// and its key contribution is well-defined (the point is still reachable).
+void
+testVariationPointBindingValidation() {
+    auto bound = buildPermutationKeys(1, 2, /*with_defs=*/true);
+    assert(bound.bound);
+
+    auto unbound = buildPermutationKeys(1, 2, /*with_defs=*/false);
+    assert(!unbound.bound);
+
+    std::cerr << "testVariationPointBindingValidation: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -581,4 +714,6 @@ main(int argc, const char **argv) {
     testModuleSymbolIndexMatchesBruteForceScan();
     testLinkerPullReachesRequiredClosure();
     testLinkerPullMatchesEagerThenPrune();
+    testPermutationKeyDiscriminatesBindings();
+    testVariationPointBindingValidation();
 }

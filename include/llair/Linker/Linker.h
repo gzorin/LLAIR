@@ -70,6 +70,28 @@ public:
     void require(llvm::StringRef);    // push a root name onto the worklist
     void resolve();                   // seed roots, drain the worklist, finalize
 
+    // A variation point is a symbol intended to bind per permutation (a BXDF,
+    // pattern, or geometry hook). Declaring the frontier explicitly -- rather
+    // than inferring it from declaration status -- both lets the caller validate
+    // that every point is bound before the IR goes downstream and defines the
+    // granularity of the permutation key.
+    void addVariationPoint(llvm::StringRef);
+
+    // True iff every declared variation point resolved to a definition in dst.
+    // Call after resolve(): an unbound point is an unresolved call the driver
+    // would otherwise only discover at compile time.
+    bool variationPointsBound() const;
+
+    // Stable hash of the (variation point -> chosen definition) bindings
+    // reachable from `entry_point`, sorted by name. Two links whose reachable
+    // bindings agree share a key; a binding change the entry cannot reach leaves
+    // its key unchanged. `entry_point` is a function in dst. The chosen
+    // definition's identity is the content of its linked IR, so IR-identical
+    // bindings collide by design. The key omits the entry function itself: the
+    // cache it feeds is partitioned per entry, within which the entry body is
+    // fixed and only the bindings vary.
+    uint64_t permutationKey(const llvm::Function *entry_point) const;
+
 private:
 
     class TypeMapper;
@@ -94,6 +116,9 @@ private:
     llvm::SmallVector<std::string, 16>     d_worklist;
     llvm::StringSet<>                      d_enqueued, d_resolved;
     llvm::SmallVector<llvm::Function *, 8> d_pending_ctors;
+
+    // Declared frontier; drives variationPointsBound() and permutationKey().
+    llvm::StringSet<> d_variation_points;
 };
 
 } // End namespace llair

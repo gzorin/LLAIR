@@ -20,6 +20,7 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/xxhash.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
@@ -123,6 +124,41 @@ forEachReferencedGlobalValue(const llvm::GlobalValue &root,
             visitReferencedOperand(aliasee, visit);
         }
     }
+}
+
+// Transitive closure of the GlobalValues reachable from `root` over the same
+// forward reference edges the pull follows (operands, initializer, aliasee;
+// metadata excluded). The reachability walk the plan shares between the pull and
+// the permutation key.
+llvm::DenseSet<const llvm::GlobalValue *>
+reachableClosure(const llvm::GlobalValue &root) {
+    llvm::DenseSet<const llvm::GlobalValue *>        seen;
+    llvm::SmallVector<const llvm::GlobalValue *, 32> worklist;
+
+    seen.insert(&root);
+    worklist.push_back(&root);
+
+    while (!worklist.empty()) {
+        const llvm::GlobalValue *gv = worklist.pop_back_val();
+        forEachReferencedGlobalValue(*gv, [&](const llvm::GlobalValue &ref) {
+            if (seen.insert(&ref).second) {
+                worklist.push_back(&ref);
+            }
+        });
+    }
+
+    return seen;
+}
+
+// Content identity of a chosen definition: a stable hash of its printed IR
+// (signature, attributes, and body/initializer/aliasee). Two definitions with
+// identical IR -- which would compile to identical bitcode -- collide by design.
+uint64_t
+hashDefinition(const llvm::GlobalValue &gv) {
+    std::string           buffer;
+    llvm::raw_string_ostream os(buffer);
+    gv.print(os);
+    return llvm::xxHash64(os.str());
 }
 
 } // namespace
@@ -784,6 +820,56 @@ Linker::resolve() {
     d_pending_ctors.clear();
 
     copyNamedMetadata();
+}
+
+void
+Linker::addVariationPoint(llvm::StringRef name) {
+    d_variation_points.insert(name);
+}
+
+bool
+Linker::variationPointsBound() const {
+    auto New = d_dst.getLLModule();
+
+    for (const auto &entry : d_variation_points) {
+        auto *gv = New->getNamedValue(entry.getKey());
+        if (!gv || gv->isDeclaration()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+uint64_t
+Linker::permutationKey(const llvm::Function *entry_point) const {
+    auto reachable = reachableClosure(*entry_point);
+
+    // (name, chosen-definition hash) for every variation point the entry reaches.
+    llvm::SmallVector<std::pair<llvm::StringRef, uint64_t>, 8> bindings;
+    for (const auto *gv : reachable) {
+        if (d_variation_points.count(gv->getName()) == 0) {
+            continue;
+        }
+        bindings.emplace_back(gv->getName(),
+                              gv->isDeclaration() ? 0 : hashDefinition(*gv));
+    }
+
+    // Sort by name so the key is independent of the walk's traversal order.
+    std::sort(bindings.begin(), bindings.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    // Fold the sorted bindings into one stable value. The NUL after each name
+    // delimits the fields so distinct (name, definition) sets cannot alias by
+    // concatenation.
+    std::string              buffer;
+    llvm::raw_string_ostream os(buffer);
+    for (const auto &[name, hash] : bindings) {
+        os << name << '\0';
+        os.write(reinterpret_cast<const char *>(&hash), sizeof(hash));
+    }
+
+    return llvm::xxHash64(os.str());
 }
 
 } // End namespace llair
