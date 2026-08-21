@@ -294,6 +294,28 @@ Module::getEntryPoint(llvm::StringRef name) const {
     return EntryPoint::Get(function);
 }
 
+const llvm::GlobalValue *
+Module::lookupDefinition(llvm::StringRef name) const {
+    if (!d_symbol_index_valid) {
+        d_symbol_index.clear();
+        for (const auto &global_value : d_llmodule->global_values()) {
+            if (global_value.isDeclaration()) {
+                continue;
+            }
+            d_symbol_index.insert(std::make_pair(global_value.getName(), &global_value));
+        }
+        d_symbol_index_valid = true;
+    }
+
+    return d_symbol_index.lookup(name);
+}
+
+void
+Module::invalidateSymbolIndex() {
+    d_symbol_index_valid = false;
+    d_symbol_index.clear();
+}
+
 struct InterfaceSpec {
     llvm::StructType *type = nullptr;
 
@@ -546,6 +568,8 @@ for_each_symmetric_difference(Input1 first1, Input1 last1, Input2 first2, Input2
 
 void
 Module::syncMetadata() {
+    invalidateSymbolIndex();
+
     // Entry points:
     {
         auto module = this;

@@ -5,6 +5,7 @@
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/SymbolTable.h>
 
+#include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/ADT/ilist.h>
@@ -109,6 +110,12 @@ public:
 
     EntryPoint *getEntryPoint(llvm::StringRef) const;
 
+    // Name-keyed index over the module's defining global values (declarations
+    // excluded). Lazily built on first lookup; dropped by syncMetadata() when
+    // the underlying llvm::Module changes en masse.
+    const llvm::GlobalValue *lookupDefinition(llvm::StringRef) const;
+    void                     invalidateSymbolIndex();
+
     //
     std::vector<Interface *> getAllInterfacesFromABI() const;
 
@@ -183,6 +190,9 @@ private:
     DispatcherMapType d_dispatchers_by_interface;
 
     friend class Dispatcher;
+
+    mutable llvm::StringMap<const llvm::GlobalValue *> d_symbol_index;
+    mutable bool                                       d_symbol_index_valid = false;
 };
 
 template<typename T>

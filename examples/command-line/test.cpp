@@ -206,7 +206,10 @@ testLinkerCanonicalizesStructsAcrossSeparateLinks() {
     auto *foo0 = llvm::StructType::create(llcontext, "struct.Foo");
     auto *foo1 = llvm::StructType::create(llcontext, "struct.Foo");
     assert(foo0->getName() == "struct.Foo");
-    assert(foo1->getName() == "struct.Foo.1");
+    // LLVM disambiguates the colliding name with a numeric suffix; the integer it
+    // starts from is version-dependent (.0 or .1), so assert only that it renamed.
+    assert(foo1->getName() != foo0->getName());
+    assert(foo1->getName().startswith("struct.Foo."));
 
     auto build_source = [&](llvm::StringRef module_name, llvm::StructType *foo,
                             llvm::StringRef global_name) {
@@ -260,6 +263,66 @@ testLinkerHandlesSelfReferentialStructTypes() {
     std::cerr << "testLinkerHandlesSelfReferentialStructTypes: OK" << std::endl;
 }
 
+// Gate for A4 (docs/linker-permutation-plan.md): Module::lookupDefinition()
+// must agree with a brute-force global_values() scan -- returning the defining
+// GlobalValue for a name and null for a name that is only declared or absent --
+// and its lazily-built index must be dropped by invalidateSymbolIndex() and by
+// syncMetadata(), the seam where the wrapper reconciles with a mutated module.
+void
+testModuleSymbolIndexMatchesBruteForceScan() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    llair::Module module("src_symidx", context);
+    auto         *m = module.getLLModule();
+
+    // A defining function and a declaration-only function:
+    createSimpleFunction(*m, "defined_fn", llvm::GlobalValue::ExternalLinkage);
+    auto *decl_fn_ty = llvm::FunctionType::get(llvm::Type::getVoidTy(llcontext), false);
+    llvm::Function::Create(decl_fn_ty, llvm::GlobalValue::ExternalLinkage, "declared_fn", m);
+
+    // A defining global (has an initializer) and a declaration-only global:
+    auto *i32_ty = llvm::Type::getInt32Ty(llcontext);
+    new llvm::GlobalVariable(*m, i32_ty, true, llvm::GlobalValue::ExternalLinkage,
+                             llvm::ConstantInt::get(i32_ty, 7), "defined_gv");
+    new llvm::GlobalVariable(*m, i32_ty, false, llvm::GlobalValue::ExternalLinkage,
+                             nullptr, "declared_gv");
+
+    auto brute_force = [&](llvm::StringRef name) -> const llvm::GlobalValue * {
+        for (const auto &gv : m->global_values()) {
+            if (!gv.isDeclaration() && gv.getName() == name) {
+                return &gv;
+            }
+        }
+        return nullptr;
+    };
+
+    for (llvm::StringRef name : {"defined_fn", "declared_fn", "defined_gv", "declared_gv"}) {
+        assert(module.lookupDefinition(name) == brute_force(name));
+    }
+
+    assert(module.lookupDefinition("defined_fn"));
+    assert(module.lookupDefinition("defined_gv"));
+    assert(!module.lookupDefinition("declared_fn")); // declared, not defined
+    assert(!module.lookupDefinition("declared_gv"));
+    assert(!module.lookupDefinition("absent"));
+
+    // A definition added after the index was built is invisible until the index
+    // is dropped -- proving both lazy rebuild and invalidateSymbolIndex().
+    createSimpleFunction(*m, "late_fn", llvm::GlobalValue::ExternalLinkage);
+    assert(!module.lookupDefinition("late_fn"));
+    module.invalidateSymbolIndex();
+    assert(module.lookupDefinition("late_fn") == brute_force("late_fn"));
+
+    // syncMetadata() is the production seam and must also drop the index.
+    createSimpleFunction(*m, "later_fn", llvm::GlobalValue::ExternalLinkage);
+    assert(!module.lookupDefinition("later_fn"));
+    module.syncMetadata();
+    assert(module.lookupDefinition("later_fn"));
+
+    std::cerr << "testModuleSymbolIndexMatchesBruteForceScan: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -280,4 +343,5 @@ main(int argc, const char **argv) {
     testLinkerPrefersRealDefinitionOverAvailableExternally();
     testLinkerCanonicalizesStructsAcrossSeparateLinks();
     testLinkerHandlesSelfReferentialStructTypes();
+    testModuleSymbolIndexMatchesBruteForceScan();
 }
