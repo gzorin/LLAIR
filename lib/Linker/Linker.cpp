@@ -7,17 +7,18 @@
 #include <llair/IR/Module.h>
 
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/Regex.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <algorithm>
+#include <cctype>
 
 using namespace llvm;
 
@@ -25,27 +26,31 @@ namespace llair {
 
 namespace {
 
-llvm::Regex&
-cxx_identifier_regex() {
-    static llvm::Regex s_cxx_identifier_regex("(struct|class)\\.([a-zA-Z_][a-zA-Z0-9_:]*(\\.[a-zA-Z_:]+)*)(\\.[0-9]+)*");
-    return s_cxx_identifier_regex;
-}
-
-bool
-test_cxx_identifier_regex(llvm::StringRef identifier) {
-    return cxx_identifier_regex().match(identifier);
-}
-
+// The canonical identity of a C++ struct/class type as encoded in an LLVM
+// identified-struct name: strip the `struct.`/`class.` prefix and the numeric
+// `.N` suffix LLVM appends to disambiguate a name colliding with one already in
+// the context. Returns `None` for names that don't fit the pattern.
 llvm::Optional<llvm::StringRef>
-match_cxx_identifier_regex(llvm::StringRef identifier) {
-    llvm::SmallVector<llvm::StringRef, 3> matches;
-    cxx_identifier_regex().match(identifier, &matches);
+canonicalStructIdentifier(llvm::StringRef name) {
+    llvm::StringRef rest = name;
 
-    if (matches.empty()) {
-        return {};
+    if (!rest.consume_front("struct.") && !rest.consume_front("class.")) {
+        return llvm::None;
     }
 
-    return { matches[2] };
+    auto dot = rest.rfind('.');
+    if (dot != llvm::StringRef::npos) {
+        auto suffix = rest.substr(dot + 1);
+        if (!suffix.empty() && suffix.find_first_not_of("0123456789") == llvm::StringRef::npos) {
+            rest = rest.substr(0, dot);
+        }
+    }
+
+    if (rest.empty() || !(std::isalpha((unsigned char)rest[0]) || rest[0] == '_')) {
+        return llvm::None;
+    }
+
+    return rest;
 }
 
 void
@@ -67,11 +72,17 @@ isODR(llvm::GlobalValue::LinkageTypes L) {
 } // namespace
 
 void
-linkModules(llair::Module *dst, const llair::Module *src) {
-    Linker linker(*dst);
+linkModules(llair::Module *dst, const llair::Module *src, LinkerTypeCache &type_cache) {
+    Linker linker(*dst, type_cache);
     linker.linkModule(src);
 
     dst->syncMetadata();
+}
+
+void
+linkModules(llair::Module *dst, const llair::Module *src) {
+    LinkerTypeCache type_cache;
+    linkModules(dst, src, type_cache);
 }
 
 void
@@ -136,76 +147,56 @@ finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::
 
 class Linker::TypeMapper : public llvm::ValueMapTypeRemapper {
 public:
-    TypeMapper(llvm::LLVMContext &context)
-        : d_context(context) {
-    }
-
-    void updateIdentifiedOpaqueStructTypes(const llvm::Module *M) {
-        auto identified_struct_types = M->getIdentifiedStructTypes();
-
-        std::for_each(
-            identified_struct_types.begin(), identified_struct_types.end(),
-            [this](auto *identified_struct_type) -> void {
-                if (!identified_struct_type->isOpaque()) {
-                    return;
-                }
-
-                auto identifier = match_cxx_identifier_regex(identified_struct_type->getName());
-
-                if (!identifier) {
-                    return;
-                }
-
-                if (d_opaque_struct_type_map.count(*identifier) != 0) {
-                    return;
-                }
-
-                d_opaque_struct_type_map.insert({ *identifier, identified_struct_type });
-            });
+    TypeMapper(llvm::LLVMContext &context, LinkerTypeCache &type_cache)
+        : d_context(context)
+        , d_type_map(type_cache.remapped_types())
+        , d_opaque_struct_type_map(type_cache.canonical_structs()) {
     }
 
     // llvm::ValueMapTypeRemapper overrides:
     llvm::Type *remapType(llvm::Type *SrcTy) override {
-        // Search the type map:
         auto it = d_type_map.find(SrcTy);
         if (it != d_type_map.end()) {
             return it->second;
         }
 
+        auto SrcStructTy     = llvm::dyn_cast<llvm::StructType>(SrcTy);
+        bool is_named_struct = SrcStructTy && SrcStructTy->hasName();
+
+        // A named opaque struct reports zero contained types but must still be
+        // canonicalized, so exclude it from the leaf early-out.
+        if (!is_named_struct && SrcTy->getNumContainedTypes() == 0) {
+            return d_type_map[SrcTy] = SrcTy;
+        }
+
+        // Placeholder breaks cycles in self-referential types: a re-entrant
+        // lookup for SrcTy reached while remapping its own fields resolves here
+        // instead of recursing forever.
+        d_type_map[SrcTy] = SrcTy;
+
         llvm::Type *RemappedTy = SrcTy;
 
-        // Remap contained types:
-        std::vector<llvm::Type *> RemappedContainedTys(SrcTy->getNumContainedTypes(), nullptr);
-
-        std::transform(
-            SrcTy->subtype_begin(), SrcTy->subtype_end(),
-            RemappedContainedTys.begin(),
-            [&](auto ContainedTy) -> llvm::Type * {
-                return remapType(ContainedTy);
-            });
-
-        if (auto SrcStructTy = llvm::dyn_cast<llvm::StructType>(SrcTy); SrcStructTy && SrcStructTy->hasName()) {
-            if (SrcStructTy->isOpaque()) {
-                auto identifier = match_cxx_identifier_regex(SrcStructTy->getName());
-
-                if (identifier) {
-                    auto it = d_opaque_struct_type_map.find(*identifier);
-                    if (it == d_opaque_struct_type_map.end()) {
-                        it = d_opaque_struct_type_map.insert({ *identifier, SrcStructTy }).first;
-                    }
-
-                    RemappedTy = it->second;
-                }
-            }
-            else {
-                RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
-                                                    SrcStructTy->isPacked());
+        if (is_named_struct && SrcStructTy->isOpaque()) {
+            auto identifier = canonicalStructIdentifier(SrcStructTy->getName());
+            if (identifier) {
+                RemappedTy = d_opaque_struct_type_map.try_emplace(*identifier, SrcStructTy).first->second;
             }
         }
         else {
-            // Are any contained types remapped?
-            if (!std::equal(SrcTy->subtype_begin(), SrcTy->subtype_end(),
-                            RemappedContainedTys.begin())) {
+            llvm::SmallVector<llvm::Type *, 8> RemappedContainedTys(SrcTy->getNumContainedTypes(), nullptr);
+            std::transform(
+                SrcTy->subtype_begin(), SrcTy->subtype_end(),
+                RemappedContainedTys.begin(),
+                [&](auto ContainedTy) -> llvm::Type * {
+                    return remapType(ContainedTy);
+                });
+
+            if (is_named_struct) {
+                RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
+                                                    SrcStructTy->isPacked());
+            }
+            else if (!std::equal(SrcTy->subtype_begin(), SrcTy->subtype_end(),
+                                 RemappedContainedTys.begin())) {
                 switch (SrcTy->getTypeID()) {
                 case Type::FunctionTyID: {
                     RemappedTy = llvm::FunctionType::get(
@@ -218,16 +209,12 @@ public:
                         RemappedContainedTys[0], cast<llvm::PointerType>(SrcTy)->getAddressSpace());
                 } break;
                 case Type::StructTyID: {
-                    auto SrcStructTy = llvm::cast<StructType>(SrcTy);
-
                     RemappedTy = llvm::StructType::get(d_context, RemappedContainedTys,
-                                                    SrcStructTy->isPacked());
+                                                    cast<StructType>(SrcTy)->isPacked());
                 } break;
                 case Type::ArrayTyID: {
-                    auto SrcArrayTy = llvm::cast<ArrayType>(SrcTy);
-
                     RemappedTy = llvm::ArrayType::get(RemappedContainedTys[0],
-                                                        SrcArrayTy->getNumElements());
+                                                        cast<ArrayType>(SrcTy)->getNumElements());
                 } break;
                 default:
                     break;
@@ -235,20 +222,18 @@ public:
             }
         }
 
-        // Cache it no matter what:
         d_type_map[SrcTy] = RemappedTy;
-
         return RemappedTy;
     }
 
 private:
-    llvm::LLVMContext &                         d_context;
-    llvm::DenseMap<llvm::Type *, llvm::Type *>  d_type_map;
-    llvm::StringMap<llvm::StructType *>         d_opaque_struct_type_map;
+    llvm::LLVMContext &                       d_context;
+    LinkerTypeCache::RemappedTypeMap &        d_type_map;
+    LinkerTypeCache::CanonicalStructMap &     d_opaque_struct_type_map;
 };
 
-Linker::Linker(Module &dst)
-: TMap(new TypeMapper(dst.getLLContext())), d_dst(dst) {
+Linker::Linker(Module &dst, LinkerTypeCache &type_cache)
+: TMap(new TypeMapper(dst.getLLContext(), type_cache)), d_dst(dst) {
 }
 
 Linker::~Linker() {
@@ -262,8 +247,6 @@ Linker::~Linker() {
 void
 Linker::linkModule(const Module *src) {
     auto New = d_dst.getLLModule();
-    TMap->updateIdentifiedOpaqueStructTypes(New);
-
     auto M   = src->getLLModule();
 
     // Map global values declared in 'src' to global values defined in 'dst':

@@ -193,6 +193,73 @@ testLinkerPrefersRealDefinitionOverAvailableExternally() {
     std::cerr << "testLinkerPrefersRealDefinitionOverAvailableExternally: OK" << std::endl;
 }
 
+// Regression test for A3 (docs/relocate-type-caches.md): a LinkerTypeCache
+// shared across separate linkModules() calls must canonicalize identified
+// structs that LLVM's own uniquing split into "struct.Foo"/"struct.Foo.1",
+// even though each link constructs an independent Linker/TypeMapper.
+void
+testLinkerCanonicalizesStructsAcrossSeparateLinks() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    // What two separately-parsed bitcode files colliding on a name produce:
+    auto *foo0 = llvm::StructType::create(llcontext, "struct.Foo");
+    auto *foo1 = llvm::StructType::create(llcontext, "struct.Foo");
+    assert(foo0->getName() == "struct.Foo");
+    assert(foo1->getName() == "struct.Foo.1");
+
+    auto build_source = [&](llvm::StringRef module_name, llvm::StructType *foo,
+                            llvm::StringRef global_name) {
+        auto module = std::make_unique<llair::Module>(module_name, context);
+        new llvm::GlobalVariable(*module->getLLModule(), llvm::PointerType::get(foo, 0), false,
+                                 llvm::GlobalValue::ExternalLinkage, nullptr, global_name);
+        return module;
+    };
+
+    auto src0 = build_source("src0", foo0, "g0");
+    auto src1 = build_source("src1", foo1, "g1");
+
+    llair::Module dst("dst_canon", context);
+
+    llair::LinkerTypeCache type_cache;
+    llair::linkModules(&dst, src0.get(), type_cache);
+    llair::linkModules(&dst, src1.get(), type_cache);
+
+    auto *dst_module = dst.getLLModule();
+    auto *g0         = dst_module->getNamedGlobal("g0");
+    auto *g1         = dst_module->getNamedGlobal("g1");
+
+    assert(g0 && g1);
+    assert(g0->getValueType() == g1->getValueType());
+
+    std::cerr << "testLinkerCanonicalizesStructsAcrossSeparateLinks: OK" << std::endl;
+}
+
+// Regression test for A3's placeholder fix: remapType() must terminate on a
+// self-referential struct instead of recursing forever into its own fields.
+void
+testLinkerHandlesSelfReferentialStructTypes() {
+    llvm::LLVMContext   llcontext;
+    llair::LLAIRContext context(llcontext);
+
+    llair::Module src("src_selfref", context);
+
+    // %struct.Node = type { %struct.Node*, i32 }
+    auto *node_ty = llvm::StructType::create(llcontext, "struct.Node");
+    node_ty->setBody({ llvm::PointerType::get(node_ty, 0),
+                       llvm::Type::getInt32Ty(llcontext) });
+
+    new llvm::GlobalVariable(*src.getLLModule(), llvm::PointerType::get(node_ty, 0), false,
+                             llvm::GlobalValue::ExternalLinkage, nullptr, "head");
+
+    llair::Module dst("dst_selfref", context);
+    llair::linkModules(&dst, &src); // must return, not hang or stack-overflow
+
+    assert(!llvm::verifyModule(*dst.getLLModule()));
+
+    std::cerr << "testLinkerHandlesSelfReferentialStructTypes: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -211,4 +278,6 @@ main(int argc, const char **argv) {
     testLinkerPreservesSourceModuleDebugInfo();
     testLinkerDedupesODRDefinitions();
     testLinkerPrefersRealDefinitionOverAvailableExternally();
+    testLinkerCanonicalizesStructsAcrossSeparateLinks();
+    testLinkerHandlesSelfReferentialStructTypes();
 }

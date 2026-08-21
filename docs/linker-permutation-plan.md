@@ -110,7 +110,7 @@ for (const Function &I : *M) {
 
 **Gate result.** Landed in `lib/Linker/Linker.cpp`: added the `isODR` helper, and gave both the function-definitions loop and the global-variable skeleton loop the same shape — look up an existing non-declaration symbol by name in `dst`; if `available_externally`, clear its body/initializer and let src's real definition win; if ODR, assert and reuse dst's `GlobalValue` untouched (no `copyAttributesFrom`, which would stomp dst's); otherwise create as before. Both loops now build a `pending_bodies`/`pending_globals` list consumed by the later body/initializer-copy pass instead of re-scanning `*M` and re-doing the `VMap` lookup. Two permanent regression tests landed in `examples/command-line/test.cpp`: `testLinkerDedupesODRDefinitions` (two source modules sharing a `linkonce_odr` function and a `linkonce_odr` global, simulating a shared header; asserts no `.N`-suffixed names, exact union-of-distinct-names counts for both functions and globals, and a clean `verifyModule`) and `testLinkerPrefersRealDefinitionOverAvailableExternally` (an `available_externally` stand-in linked first, then a real definition; asserts dst ends up with the real linkage and body, not a rename). Verified both tests fail without the corresponding dedup branch (reverted each temporarily) and pass with it. Full rebuild of `extsrc/llair` succeeds with no new warnings.
 
-## A3 — Relocate type caches to `LLAIRContextImpl`
+## A3 — Relocate type caches out of `Linker` — DONE (2026-08-21)
 
 `d_type_map` is keyed on `llvm::Type *`, context-owned and immortal. `d_opaque_struct_type_map` canonicalizes `struct.Foo.3` / `struct.Foo.7` to one identity. Neither depends on which `dst` is being filled, and both are discarded per `Linker`, i.e. per permutation.
 
@@ -134,6 +134,10 @@ Micro-work, same milestone: `SmallVector<Type *, 8>` for `RemappedContainedTys`;
 **Risk.** `remapType` writes its cache entry only *after* recursing, so a self-referential struct recurses forever. Latent under typed pointers, which is where this codebase is. Insert a placeholder before descending.
 
 **Gate.** Linked IR bit-identical to the A2 baseline across the corpus. Second gate: permutation *k* performs strictly fewer `TypeFinder` runs than *k−1* — instrument and assert.
+
+**Deviation from plan.** The caches are **caller-owned**, not on `LLAIRContextImpl`. A caller constructs a `LinkerTypeCache` (public, in `include/llair/Linker/Linker.h`) and passes it to `Linker(Module&, LinkerTypeCache&)` / `linkModules(dst, src, cache)`, so it can scope canonicalization to a batch of modules it knows share struct identity rather than to the whole context. The 2-arg `linkModules(dst, src)` is retained (builds a fresh local cache) so A1/A2 call sites and tests are unchanged; `llair-link` and `llair-metallib` now build one cache and reuse it across all inputs linked into their single output. This also removes the layering exception the `LLAIRContextImpl` version needed — `Linker.cpp` never reaches into `lib/IR`, so `lib/Linker/CMakeLists.txt` is untouched. The `llvm::Regex` global is retired entirely (replaced by `canonicalStructIdentifier`, a prefix/suffix parse) rather than moved.
+
+**Gate result.** `updateIdentifiedOpaqueStructTypes` was dropped entirely, so the second gate is satisfied unconditionally and permanently: the function that ran `TypeFinder` no longer exists, so the count is zero from the first permutation onward. Every opaque struct that can appear in `dst` arrives through `remapType`, which records it in the (now batch-scoped) canonical map on first sight; `dst` is always freshly built in real usage, never bitcode-loaded, so there is nothing to re-seed. The self-referential-struct recursion risk is fixed by inserting a placeholder before descending. Two regression tests in `examples/command-line/test.cpp` — `testLinkerCanonicalizesStructsAcrossSeparateLinks` (canonicalization survives across independent `Linker`/`TypeMapper` instances sharing one cache) and `testLinkerHandlesSelfReferentialStructTypes` (linking a `%struct.Node = { %struct.Node*, i32 }` terminates and verifies) — join the existing three.
 
 ## A4 — Symbol index on `llair::Module`
 
@@ -235,7 +239,7 @@ With B3's decision, this falls out almost for free: one metallib per entry means
 
 ## Deferred
 
-- **Opaque-pointer migration.** A0's harvested note and A3's context-scoped canonical struct table are the enablers: receiver types come from a name lookup, not `getElementType()`.
+- **Opaque-pointer migration.** A0's harvested note and A3's caller-owned canonical struct table are the enablers: receiver types come from a name lookup, not `getElementType()`.
 - **LLVM 17+ upgrade.** `PassManagerBuilder`, the legacy pass manager, `llvm::Optional`, and `PointerType::getElementType()` all block it. B2's outcome determines how much of `finalizeLibrary` survives the port.
 - **Threading.** `LLVMContext` is not thread-safe. If permutation builds move to workers, each owns a context, and neither source modules nor the A3 caches cross worker boundaries — the ThinLTO shape is bitcode buffers parsed lazily per context with per-context copies of both tables. Cheaper to decide before A3 lands. The `contexts::llvm_to_llair()` global `std::map` is the one unguarded static either way; make it a `DenseMap` regardless.
 - **`makeLibraryWithLLD` path.** Untouched by this plan. It already does reachability properly via internalize-to-entry-points plus `GlobalDCE`, at the cost of a subprocess.
@@ -247,7 +251,6 @@ Independent, cheap, no ordering constraints:
 - `llvm.module.flags` is dropped from `src` entirely when `dst` has any, rather than merged under the flags' own behavior semantics.
 - Non-"once" named metadata operands are appended unconditionally, so linking the same source twice duplicates them.
 - `s_once_metadata_names` is a `std::set<StringRef>` of six entries — `StringSwitch` or a sorted array.
-- `test_cxx_identifier_regex` is unused.
 - `<llair/IR/Module.h>` is included twice in `Linker.cpp`.
 - `makeLibrary(const llvm::Module &)` const_casts and the writer mutates the argument — `setSDKVersion`, named metadata erasure, `DIFile` operand replacement. The clone in `finalizeLibrary` is therefore load-bearing for source preservation and must not be removed as "redundant," whatever B2 decides about the pass pipeline.
 
@@ -265,7 +268,7 @@ B1 first, before anything else in either series — it is one call, and its outc
 
 - **A1 is a cost increase.** Cloning distinct metadata is real work the current code avoids by mutating sources. Accept it; the property it buys is the premise of the design.
 - **A5 is the only milestone that can be wrong quietly.** A missed edge produces IR that links, verifies, and then fails in the driver or renders subtly wrong. The `GlobalDCE` differential gate is load-bearing.
-- **A3 widens the scope of mutable state.** A stale entry in a context-scoped `d_type_map` corrupts every permutation rather than one. Types are immortal so it should be safe by construction — assert that a remapped type's context matches rather than trusting the argument.
+- **A3 widens the scope of mutable state.** A stale entry in a shared `LinkerTypeCache` corrupts every link in that batch rather than one. Caller-owned scoping bounds the blast radius to the batch the caller chose to share, and types are immortal so it should be safe by construction — assert that a remapped type's context matches rather than trusting the argument.
 - **A5 and A6 may be redundant with each other.** High cache hit rate on the permutation key sharply reduces A5's marginal value. B4's gate answers this; run it early.
 - **B3's win scales with E.** If a typical permutation library has one or two entry points, the clone reduction is small and B2's outcome matters far more.
 - **Upstream floor_llvm sync is now a standing dependency.** The version tables and `llvm.ident` strings need updating per macOS release. If a sync ever changes `WriteMetalLibToFile`'s entry-point handling, B3's assumption that a single-entry module produces one well-formed container needs rechecking.

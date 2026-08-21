@@ -66,10 +66,14 @@ main(int argc, char **argv) {
 
     auto output = std::make_unique<llair::Module>(output_filename, *llair_context);
 
+    // All inputs link into one output and share struct identity; reuse one
+    // cache across the batch so canonicalization persists between links.
+    llair::LinkerTypeCache type_cache;
+
     std::for_each(
         input_modules.begin(), input_modules.end(),
-        [&output](auto &input_module) -> void {
-            linkModules(output.get(), input_module.get());
+        [&output, &type_cache](auto &input_module) -> void {
+            linkModules(output.get(), input_module.get(), type_cache);
         });
 
     auto interfaces = output->getAllInterfacesFromABI();
