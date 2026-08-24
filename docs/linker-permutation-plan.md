@@ -233,17 +233,25 @@ Note regardless of outcome: `PassManagerBuilder` and the legacy pass manager are
 
 **Gate.** A recorded decision with the three numbers attached, not a code change.
 
-## B3 — One entry point per metallib
+## B3 — Reachability-filtered per-entry clone
 
-Currently `WriteMetalLibToFile` performs a full `CloneModule` **per entry point**, each followed by `createInternalizePass` down to a single symbol plus `createGlobalOptimizerPass` to prune it back. With `finalizeLibrary`'s own clone that is `1 + E` deep copies, and each per-entry clone is clone-everything-then-delete-almost-all.
+`WriteMetalLibToFile` performs a full `CloneModule` **per entry point**, each followed by `createInternalizePass` down to a single symbol plus `createGlobalOptimizerPass` to prune it back. With `finalizeLibrary`'s own clone that is `1 + E` deep copies, and each per-entry clone is clone-everything-then-delete-almost-all.
 
-llair instead applies the shared reachability walk per entry point, produces a single-entry pruned module for each, and calls the writer once per entry. The writer's internal clone then copies a module that is already minimal, and internalize/GlobalOpt find nothing to do. No third-party changes.
+`E` is larger than it appears. A `MaterialEvaluationPass` program carries at least seven entry points — `Init`, `Allocate`, `OffsetsAscending`, `OffsetsDescending`, `Distribute`, `EmitLaunch`, `Main`. Six are tiny queue-management kernels, and each currently receives a complete clone of a module containing every BXDF permutation body before internalize and DCE discard it.
 
-**Decided.** Emit one `.metallib` per entry point rather than merging. Merging would require reimplementing container assembly — offsets, tag tables, header control — which is exactly the fork the constraints forbid. Metal permits `vertexFunction` and `fragmentFunction` to come from different `MTLLibrary` objects, so co-residency is not required for ordinary render pipeline states.
+**Vendored patch.** `llvm::CloneModule` has an overload taking `function_ref<bool(const GlobalValue *)> ShouldCloneDefinition`. Compute reachability from the entry point first — a walk over the existing IR, no allocation, no cloning — then clone only what it reaches.
 
-**Risk, resolve before building.** Verify Bourbon has no case needing functions co-resident in one library. Linked functions and visible function tables (`MTLLinkedFunctions`, `MTLVisibleFunctionTable`) have their own residency rules; if any current or planned path uses them, this decision needs revisiting and merging comes back into scope.
+**Correction, and a hard constraint on this milestone.** An earlier draft claimed internalize and GlobalOpt might become droppable once the clone is filtered. That is wrong, and shipping it would silently break function constants.
 
-**Gate.** Byte-identical bitcode blobs versus the pre-split path for the same entry point, or a documented explanation of every difference. Second gate: total clone count per permutation drops from `1 + E` to `E`, instrumented.
+`ShouldCloneDefinition` returning false still emits the `GlobalValue` as an external *declaration*; it does not omit it. The writer's `air.function_constants` filter keeps nodes whose `getOperand(0)` is non-null, which is a proxy for "the underlying global was erased" — and a declaration is not erased. Unreferenced constants would therefore survive into the entry's `CNST` tag, and Metal would demand values for constants the entry point never reads. `createGlobalOptimizerPass` does not erase these; `GlobalDCE` does, which is why the local addition of a per-extracted-module DCE was necessary to make function constants work at all.
+
+**Decided.** The filtered clone is an addition to the existing prune, not a replacement for it. A DCE (or equivalent explicit erasure of unreferenced declarations) must run on each cloned module. `air.sampler_states` and the entry-point metadata lists use the identical null-operand idiom and are subject to the same reasoning.
+
+Uses the shared reachability walk from *Shared components*, which means it must be reachable from the writer's translation unit. **Implementer's choice** whether that means the walk lives in a small header both consume, or is duplicated — it is thirty lines, and duplication may be the cleaner patch to offer upstream.
+
+**The v1 decision to emit one `.metallib` per entry point is withdrawn.** It existed only to pre-shrink the module before a clone that could not be filtered. Multi-entry containers are retained, which keeps `MTLLinkedFunctions` and `MTLVisibleFunctionTable` paths available without revisiting the decision, and keeps the cache unit in B4 a container entry rather than a whole file.
+
+**Gate.** Byte-identical bitcode blobs versus the unfiltered path for every entry point, or a documented explanation of each difference. Second gate: per-entry clone cost scales with the entry's reachable set rather than with module size — instrument on a module with one small entry and one large one. Third gate, non-negotiable: a module where entry points use disjoint subsets of the function constants produces per-entry `CNST` tags listing only that entry's constants. This is the regression the correction above describes; it must be a test, not an inspection.
 
 ## B4 — Entry-level blob caching
 
