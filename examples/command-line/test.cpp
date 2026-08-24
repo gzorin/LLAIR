@@ -4,6 +4,8 @@
 #include <llair/Linker/Linker.h>
 
 #include <llvm/BinaryFormat/Dwarf.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/Bitcode/MetalLibWriter.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DIBuilder.h>
@@ -22,11 +24,14 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -691,6 +696,295 @@ testVariationPointBindingValidation() {
     std::cerr << "testVariationPointBindingValidation: OK" << std::endl;
 }
 
+// Serialize a module the same way WriteMetalLibToFile's per-entry write does.
+std::string
+serializeAsBitcode140(llvm::Module &module) {
+    std::string           buffer;
+    llvm::raw_string_ostream os(buffer);
+    llvm::WriteBitcodeToFile140(module, os);
+    os.flush();
+    return buffer;
+}
+
+// Gate 1 for B3 (docs/linker-permutation-plan.md): filtering CloneModule's
+// definitions to an entry's reachable set must not change the final pruned
+// module -- internalize+GlobalOpt+GlobalDCE already discard everything a
+// filtered clone would have skipped, so cloning full bodies for code that
+// gets discarded anyway is pure waste, not a correctness dependency. Two
+// entries share `common`; each also has a private helper/global nothing else
+// reaches.
+void
+testBuildEntryModuleByteIdenticalToUnfilteredPath() {
+    llvm::LLVMContext llcontext;
+    llvm::Module       module("b3_gate1", llcontext);
+    auto              *i32 = llvm::Type::getInt32Ty(llcontext);
+
+    auto *common = createReturningFunction(module, "common", llvm::GlobalValue::ExternalLinkage, 1);
+
+    auto *priv_a = new llvm::GlobalVariable(module, i32, true, llvm::GlobalValue::InternalLinkage,
+                                            llvm::ConstantInt::get(i32, 11), "priv_a");
+    auto *only_a = llvm::Function::Create(llvm::FunctionType::get(i32, false),
+                                          llvm::GlobalValue::InternalLinkage, "only_a", module);
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", only_a));
+        b.CreateRet(b.CreateLoad(i32, priv_a));
+    }
+
+    auto *priv_b = new llvm::GlobalVariable(module, i32, true, llvm::GlobalValue::InternalLinkage,
+                                            llvm::ConstantInt::get(i32, 22), "priv_b");
+    auto *only_b = llvm::Function::Create(llvm::FunctionType::get(i32, false),
+                                          llvm::GlobalValue::InternalLinkage, "only_b", module);
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", only_b));
+        b.CreateRet(b.CreateLoad(i32, priv_b));
+    }
+
+    auto build_entry = [&](llvm::StringRef name, llvm::Function *only) {
+        auto *entry = llvm::Function::Create(
+            llvm::FunctionType::get(llvm::Type::getVoidTy(llcontext), false),
+            llvm::GlobalValue::ExternalLinkage, name, module);
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", entry));
+        b.CreateCall(common);
+        b.CreateCall(only);
+        b.CreateRetVoid();
+        return entry;
+    };
+    auto *entry_a = build_entry("entry_a", only_a);
+    auto *entry_b = build_entry("entry_b", only_b);
+
+    auto always_true = [](const llvm::GlobalValue *) { return true; };
+
+    auto check_entry = [&](llvm::Function                                    *entry,
+                           const std::set<const llvm::GlobalValue *> &reachable) {
+        auto unfiltered = llvm::buildEntryModule(module, entry, always_true, 250);
+        auto filtered   = llvm::buildEntryModule(
+            module, entry,
+            [&reachable](const llvm::GlobalValue *gv) { return reachable.count(gv) != 0; }, 250);
+
+        assert(serializeAsBitcode140(*unfiltered) == serializeAsBitcode140(*filtered));
+    };
+
+    check_entry(entry_a, {entry_a, common, only_a, priv_a});
+    check_entry(entry_b, {entry_b, common, only_b, priv_b});
+
+    std::cerr << "testBuildEntryModuleByteIdenticalToUnfilteredPath: OK" << std::endl;
+}
+
+// Gate 2 for B3: buildEntryModule's cost under a real reachability predicate
+// must track the entry's reachable set, not the whole module -- an
+// accidentally-ignored ShouldCloneDefinition (still cloning every body) would
+// scale with total module size instead.
+void
+testBuildEntryModuleCostScalesWithReachableSet() {
+    auto build_and_time = [](unsigned pad_count) -> double {
+        llvm::LLVMContext llcontext;
+        llvm::Module       module("b3_gate2", llcontext);
+        auto              *i32 = llvm::Type::getInt32Ty(llcontext);
+
+        auto *entry = llvm::Function::Create(llvm::FunctionType::get(i32, false),
+                                             llvm::GlobalValue::ExternalLinkage, "tiny_entry", module);
+        {
+            llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", entry));
+            b.CreateRet(llvm::ConstantInt::get(i32, 0));
+        }
+
+        // Unrelated padding: none of this is reachable from `entry`.
+        for (unsigned i = 0; i < pad_count; ++i) {
+            createReturningFunction(module, "pad" + std::to_string(i),
+                                    llvm::GlobalValue::InternalLinkage, int(i));
+        }
+
+        std::unordered_set<const llvm::GlobalValue *> reachable{entry};
+        auto predicate = [&reachable](const llvm::GlobalValue *gv) {
+            return reachable.count(gv) != 0;
+        };
+
+        auto t0     = std::chrono::steady_clock::now();
+        auto cloned = llvm::buildEntryModule(module, entry, predicate, 250);
+        auto t1     = std::chrono::steady_clock::now();
+        (void)cloned;
+
+        return std::chrono::duration<double, std::milli>(t1 - t0).count();
+    };
+
+    auto best_of = [&](unsigned pad_count) {
+        double best = std::numeric_limits<double>::infinity();
+        for (int rep = 0; rep < 3; ++rep) {
+            best = std::min(best, build_and_time(pad_count));
+        }
+        return best;
+    };
+
+    constexpr unsigned kSmall = 500, kLarge = 5000; // 10x the unrelated module size
+    auto               small_ms = best_of(kSmall);
+    auto               large_ms = best_of(kLarge);
+
+    std::cerr << "testBuildEntryModuleCostScalesWithReachableSet: " << kSmall
+              << " unrelated fns = " << small_ms << "ms, " << kLarge
+              << " unrelated fns = " << large_ms << "ms" << std::endl;
+
+    // Not a strict scaling proof -- a generous bound that still catches an
+    // accidentally-still-O(module size) implementation (which would come much
+    // closer to a 10x blowup than this).
+    assert(large_ms < small_ms * 5.0 + 5.0 /* floor for sub-ms noise */);
+
+    std::cerr << "testBuildEntryModuleCostScalesWithReachableSet: OK" << std::endl;
+}
+
+// Gate 3 for B3, the correction's load-bearing regression test: two entries
+// with disjoint function constants must each retain only their own constant
+// in air.function_constants after buildEntryModule. A filtered-out constant's
+// global survives CloneModule as an external declaration -- only the GlobalDCE
+// added alongside the filtered clone actually erases it, which is what nulls
+// the metadata operand the writer's null-operand idiom checks. Verified this
+// fails without that GlobalDCE call (temporarily commented out) before landing.
+void
+testBuildEntryModuleDisjointFunctionConstants() {
+    llvm::LLVMContext llcontext;
+    llvm::Module       module("b3_gate3", llcontext);
+    auto              *i32 = llvm::Type::getInt32Ty(llcontext);
+
+    auto make_constant_global = [&](llvm::StringRef name) {
+        return new llvm::GlobalVariable(module, i32, false, llvm::GlobalValue::ExternalLinkage,
+                                        nullptr, name);
+    };
+    auto *gv_a = make_constant_global("fc_a_gv");
+    auto *gv_b = make_constant_global("fc_b_gv");
+
+    auto build_entry = [&](llvm::StringRef name, llvm::GlobalVariable *fc_gv) {
+        auto *entry = llvm::Function::Create(
+            llvm::FunctionType::get(llvm::Type::getVoidTy(llcontext), false),
+            llvm::GlobalValue::ExternalLinkage, name, module);
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", entry));
+        b.CreateLoad(i32, fc_gv);
+        b.CreateRetVoid();
+        return entry;
+    };
+    auto *entry_a = build_entry("fc_entry_a", gv_a);
+    auto *entry_b = build_entry("fc_entry_b", gv_b);
+
+    auto make_fc_node = [&](llvm::GlobalVariable *gv, llvm::StringRef type_name,
+                           llvm::StringRef cnst_name, uint32_t index) {
+        llvm::Metadata *ops[] = {
+            llvm::ConstantAsMetadata::get(gv),
+            llvm::MDString::get(llcontext, type_name),
+            llvm::MDString::get(llcontext, cnst_name),
+            llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(i32, index)),
+        };
+        return llvm::MDNode::get(llcontext, ops);
+    };
+
+    auto *fc_md = module.getOrInsertNamedMetadata("air.function_constants");
+    fc_md->addOperand(make_fc_node(gv_a, "int", "fc_a", 0));
+    fc_md->addOperand(make_fc_node(gv_b, "int", "fc_b", 1));
+
+    auto reachable_for = [](llvm::Function *entry, llvm::GlobalVariable *gv) {
+        return [entry, gv](const llvm::GlobalValue *g) { return g == entry || g == gv; };
+    };
+
+    auto cloned_a = llvm::buildEntryModule(module, entry_a, reachable_for(entry_a, gv_a), 250);
+    auto cloned_b = llvm::buildEntryModule(module, entry_b, reachable_for(entry_b, gv_b), 250);
+
+    auto surviving_constants = [](llvm::Module &m) {
+        std::set<std::string> names;
+        if (auto *md = m.getNamedMetadata("air.function_constants")) {
+            for (auto *node : md->operands()) {
+                if (node->getOperand(0).get() == nullptr) {
+                    continue; // erased by GlobalDCE -- not this entry's constant
+                }
+                names.insert(llvm::cast<llvm::MDString>(node->getOperand(2))->getString().str());
+            }
+        }
+        return names;
+    };
+
+    assert((surviving_constants(*cloned_a) == std::set<std::string>{"fc_a"}));
+    assert((surviving_constants(*cloned_b) == std::set<std::string>{"fc_b"}));
+
+    std::cerr << "testBuildEntryModuleDisjointFunctionConstants: OK" << std::endl;
+}
+
+// Regression test for a correctness bug found after B3 first landed, on a real
+// corpus (examples/sg/triangle), not this synthetic one: an "air.static_init"
+// function -- Metal's mechanism for copying a function-constant value into a
+// global before any entry point executes -- has no call edge from any entry,
+// so a per-entry reachability walk rooted only at the entry can never find it.
+// Worse, the ctor's only real (non-metadata) use is usually the pointer to it
+// in @llvm.global_ctors's initializer; without that array also surviving,
+// GlobalOpt sees the ctor as unused and deletes it outright even once the
+// ctor itself is marked reachable. Both gaps must be closed, or the shader
+// that reads the global the ctor writes silently gets an uninitialized value.
+void
+testBuildEntryModulePreservesStaticInitCtor() {
+    llvm::LLVMContext llcontext;
+    llvm::Module       module("b3_static_init", llcontext);
+    auto              *i32     = llvm::Type::getInt32Ty(llcontext);
+    auto              *i8_ptr  = llvm::Type::getInt8PtrTy(llcontext);
+
+    // A real Metal function-constant placeholder: an external declaration the
+    // driver fills in at specialization time. Unlike a compile-time constant,
+    // GlobalOpt's ctor evaluator cannot fold a load from this away, so the
+    // ctor genuinely has to survive and run -- exactly what made the bug
+    // observable on the real corpus and invisible with a foldable store.
+    auto *fc_init = new llvm::GlobalVariable(
+        module, i32, false, llvm::GlobalValue::ExternalLinkage, nullptr, "fc_init_placeholder");
+
+    auto *fc_global = new llvm::GlobalVariable(
+        module, i32, false, llvm::GlobalValue::InternalLinkage,
+        llvm::UndefValue::get(i32), "fc_global");
+
+    auto *ctor = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llcontext), false),
+        llvm::GlobalValue::InternalLinkage, "ctor", module);
+    ctor->setSection("air.static_init");
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", ctor));
+        b.CreateStore(b.CreateLoad(i32, fc_init), fc_global);
+        b.CreateRetVoid();
+    }
+
+    // @llvm.global_ctors = appending global [1 x {i32, void()*, i8*}] [...]
+    auto *ctor_entry_ty = llvm::StructType::get(i32, ctor->getType(), i8_ptr);
+    auto *ctors_ty      = llvm::ArrayType::get(ctor_entry_ty, 1);
+    auto *ctor_entry    = llvm::ConstantStruct::get(
+        ctor_entry_ty, { llvm::ConstantInt::get(i32, 65535), ctor,
+                         llvm::ConstantPointerNull::get(i8_ptr) });
+    new llvm::GlobalVariable(module, ctors_ty, false, llvm::GlobalValue::AppendingLinkage,
+                             llvm::ConstantArray::get(ctors_ty, { ctor_entry }),
+                             "llvm.global_ctors");
+
+    auto *entry = llvm::Function::Create(llvm::FunctionType::get(i32, false),
+                                         llvm::GlobalValue::ExternalLinkage, "entry", module);
+    {
+        llvm::IRBuilder<> b(llvm::BasicBlock::Create(llcontext, "entry", entry));
+        b.CreateRet(b.CreateLoad(i32, fc_global));
+    }
+
+    // Reproduce the bug: reachability from `entry` alone never reaches `ctor`
+    // -- nothing in `entry`'s own body references it.
+    std::set<const llvm::GlobalValue *> entry_only{ entry, fc_global };
+    auto buggy = llvm::buildEntryModule(
+        module, entry,
+        [&entry_only](const llvm::GlobalValue *gv) { return entry_only.count(gv) != 0; }, 250);
+    assert(!buggy->getFunction("ctor") || buggy->getFunction("ctor")->isDeclaration());
+
+    // The fix: fold computeStaticInitRoots()'s closure into the predicate.
+    auto static_init_roots = llvm::computeStaticInitRoots(module);
+    auto fixed             = llvm::buildEntryModule(
+        module, entry,
+        [&entry_only, &static_init_roots](const llvm::GlobalValue *gv) {
+            return entry_only.count(gv) != 0 || static_init_roots.count(gv) != 0;
+        },
+        250);
+
+    auto *fixed_ctor = fixed->getFunction("ctor");
+    assert(fixed_ctor && !fixed_ctor->isDeclaration());
+    auto *fixed_ctors_gv = fixed->getNamedGlobal("llvm.global_ctors");
+    assert(fixed_ctors_gv && fixed_ctors_gv->hasInitializer());
+
+    std::cerr << "testBuildEntryModulePreservesStaticInitCtor: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -716,4 +1010,8 @@ main(int argc, const char **argv) {
     testLinkerPullMatchesEagerThenPrune();
     testPermutationKeyDiscriminatesBindings();
     testVariationPointBindingValidation();
+    testBuildEntryModuleByteIdenticalToUnfilteredPath();
+    testBuildEntryModuleCostScalesWithReachableSet();
+    testBuildEntryModuleDisjointFunctionConstants();
+    testBuildEntryModulePreservesStaticInitCtor();
 }
