@@ -21,10 +21,35 @@
 
 #include "ToolsImpl.h"
 
+#if __has_include(<os/signpost.h>)
+#include <os/signpost.h>
+#define LLAIR_HAVE_SIGNPOST 1
+#endif
+
 namespace llair {
 
+namespace {
+
+#if LLAIR_HAVE_SIGNPOST
+// Points-of-Interest category so intervals show up in Instruments' Points of
+// Interest track without a custom template.
+os_log_t
+metallibSignpostLog() {
+    static os_log_t log = os_log_create("com.bourbon.llair", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
+    return log;
+}
+#endif
+
+}
+
 std::unique_ptr<llvm::Module>
-finalizeLibrary(const Module& module) {
+finalizeLibrary(const Module& module, unsigned opt_level) {
+#if LLAIR_HAVE_SIGNPOST
+    auto signpost_log = metallibSignpostLog();
+    auto signpost_id  = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "finalizeLibrary", "opt_level=%u", opt_level);
+#endif
+
 #if LLVM_VERSION_MAJOR >= 8
     auto finalized_module = llvm::CloneModule(*module.getLLModule());
 #else
@@ -43,7 +68,7 @@ finalizeLibrary(const Module& module) {
 
     llvm::PassManagerBuilder pmb;
 
-    pmb.OptLevel  = 3;
+    pmb.OptLevel  = opt_level;
     pmb.SizeLevel = 1;
 
     pmb.Inliner = llvm::createFunctionInliningPass(pmb.OptLevel, pmb.SizeLevel, false);
@@ -64,6 +89,10 @@ finalizeLibrary(const Module& module) {
 
     mpm.run(*finalized_module);
 
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "finalizeLibrary");
+#endif
+
     return finalized_module;
 }
 
@@ -78,10 +107,22 @@ makeLibrary(const llvm::Module &module) {
 }
 
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-makeLibrary(const Module &module) {
-    auto finalized_module = finalizeLibrary(module);
+makeLibrary(const Module &module, unsigned opt_level) {
+#if LLAIR_HAVE_SIGNPOST
+    auto signpost_log = metallibSignpostLog();
+    auto signpost_id  = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "makeLibrary", "opt_level=%u", opt_level);
+#endif
 
-    return makeLibrary(*finalized_module);
+    auto finalized_module = finalizeLibrary(module, opt_level);
+
+    auto result = makeLibrary(*finalized_module);
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "makeLibrary");
+#endif
+
+    return result;
 }
 
 namespace {

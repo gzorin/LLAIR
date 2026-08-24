@@ -22,6 +22,11 @@
 #include <iostream>
 #include <memory>
 
+#if __has_include(<os/signpost.h>)
+#include <os/signpost.h>
+#define LLAIR_HAVE_SIGNPOST 1
+#endif
+
 namespace {
 #include "llair-triangle_metal_bc.h"
 }
@@ -95,8 +100,18 @@ llair_example_init(int argc, const char * argv[], id<MTLDevice> device, MTKView 
 
     NSError *err = nil;
 
+#if LLAIR_HAVE_SIGNPOST
+    static os_log_t signpost_log = os_log_create("com.bourbon.llair", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
+    auto signpost_id = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "newLibraryWithData");
+#endif
+
     auto metal_library = [s_context->d_device newLibraryWithData: library_data
                           error: &err];
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "newLibraryWithData");
+#endif
 
     if (!metal_library) {
         std::cerr << "Error occurred when creating shader library: " << [err code] << std::endl;

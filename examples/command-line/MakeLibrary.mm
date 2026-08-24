@@ -24,6 +24,11 @@
 #include <algorithm>
 #include <iostream>
 
+#if __has_include(<os/signpost.h>)
+#include <os/signpost.h>
+#define LLAIR_HAVE_SIGNPOST 1
+#endif
+
 namespace {
 
 llvm::cl::opt<std::string> input_filename(llvm::cl::Positional,
@@ -32,6 +37,9 @@ llvm::cl::opt<std::string> input_filename(llvm::cl::Positional,
 
 llvm::cl::opt<std::string> vertex_function_name("vertex-function", llvm::cl::desc("Vertex function name"));
 llvm::cl::opt<std::string> fragment_function_name("fragment-function", llvm::cl::desc("Fragment function name"));
+
+llvm::cl::opt<unsigned> opt_level("O", llvm::cl::init(3),
+                                  llvm::cl::desc("Optimization level for metallib finalization"));
 
 } // namespace
 
@@ -65,7 +73,7 @@ main(int argc, char ** argv) {
     });
 
     // Turn into library bitcode:
-    auto library = llair::makeLibrary(*module);
+    auto library = llair::makeLibrary(*module, opt_level);
 
     if (!library) {
         std::cerr << "makeLibrary failed" << std::endl;
@@ -83,7 +91,17 @@ main(int argc, char ** argv) {
               dispatch_get_main_queue(),
               ^{ delete library_buffer; });
 
+#if LLAIR_HAVE_SIGNPOST
+    static os_log_t signpost_log = os_log_create("com.bourbon.llair", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
+    auto signpost_id = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "newLibraryWithData", "opt_level=%u", opt_level.getValue());
+#endif
+
     auto library = [device newLibraryWithData: library_data error: &err];
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "newLibraryWithData");
+#endif
 
     if (!library) {
         NSLog(@"Error occurred creating MTLLibrary: %@", err);

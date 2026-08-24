@@ -37,6 +37,9 @@ llvm::cl::opt<std::string> output_filename("o", llvm::cl::Required,
                                            llvm::cl::desc("Override output filename"),
                                            llvm::cl::value_desc("filename"));
 
+llvm::cl::opt<unsigned> opt_level("O", llvm::cl::init(3),
+                                  llvm::cl::desc("Optimization level for metallib finalization"));
+
 } // namespace
 
 using namespace llair;
@@ -89,7 +92,7 @@ main(int argc, char **argv) {
         return it->second;
     });
 
-    auto output_ll = finalizeLibrary(*output);
+    auto output_ll = finalizeLibrary(*output, opt_level);
 
     // Write it out:
     std::error_code                       error_code;

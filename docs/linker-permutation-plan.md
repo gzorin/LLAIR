@@ -221,7 +221,7 @@ Filesystem I/O and bz2 compression per permutation, none of it consumed by Bourb
 
 **Gate result.** Instrumented the predicate first, without needing to run the interactive renderer: disassembled all 98 `.bc` files produced by the current build (Metal-compiled shader sources plus MaterialX BXDF/pattern-generated bitcode) and found none carry a `DICompileUnit`; no `-g` flag exists anywhere in `cmake/modules/metal.cmake`. The predicate is false on Bourbon's IR today, so this landed as a correctness/future-proofing fix rather than a measured performance win — the doc's own anticipated outcome. Series B should rerank around B2 next. Verified: `libLLAIRTools`/`BourbonCore`/`llair-metallib` rebuild and relink cleanly, all existing tests (174 GoogleTest cases plus `tg-test`/`future-test`) pass, and `llair-metallib` still produces a valid `.metallib` end-to-end.
 
-## B2 — Calibrate the optimization pipeline
+## B2 — Calibrate the optimization pipeline — DONE (2026-08-24)
 
 `finalizeLibrary` runs `PassManagerBuilder` at `OptLevel 3` / `SizeLevel 1` over the whole module. The output is AIR bitcode that Apple's driver then compiles to AGX ISA with its own full pipeline. Much of this is work the driver redoes.
 
@@ -232,6 +232,24 @@ It is not obviously all wasted: inlining before the per-entry split shrinks each
 Note regardless of outcome: `PassManagerBuilder` and the legacy pass manager are removed in LLVM 17, so this code needs rewriting at the next upgrade. The separate `fpm`-over-all-functions loop followed by `mpm` is the standard clang idiom, not an accident — it is not the redundancy worth chasing.
 
 **Gate.** A recorded decision with the three numbers attached, not a code change.
+
+**Landed.** `opt_level` is now a permanent parameter (default `3`) threaded through `finalizeLibrary(const Module&, unsigned)` and `makeLibrary(const Module&, unsigned)`, exposed as `-O` on `llair-metallib` and `make-library`, and read from `BOURBON_METALLIB_OPT` (default `3`) at the one call site in Bourbon's `Program::build`. Only `pmb.OptLevel` is parameterized; `SizeLevel` stays `1` per the doc's instruction, and lines 49–53 (`Inliner`/unroll/vectorize) are untouched — they already key off `OptLevel`. Three `os_signpost` interval pairs (Points-of-Interest category, subsystem `com.bourbon.llair`) instrument `finalizeLibrary`, `makeLibrary`, and `newLibraryWithData`, each tagged with `opt_level`; `Program::build` also gained an env-gated corpus dump (`BOURBON_DUMP_METALLIB_IR=<dir>`, `llvm::WriteBitcodeToFile` on the pre-finalize module, monotonic per-process counter) that freezes real permutations to disk.
+
+**Measurement.** Corpus: 43 real permutations captured live from `examples/sg/triangle` and `examples/sg/sdf3ds` (no external asset dependencies, per the user's steer away from `mtlxview`, which crashes headless on a missing-model `intrusive_ptr` assertion unrelated to this milestone) via `BOURBON_DUMP_METALLIB_IR`, at `/tmp/metallib_corpus` (ephemeral, not committed, per the doc's *Validation* section). (1)/(2) were measured offline by replaying the corpus through `make-library -O0`/`-O3` (which exercises `finalizeLibrary`, `makeLibrary`, and `newLibraryWithData` in one process) with signposts captured via `log stream --signpost --predicate 'subsystem == "com.bourbon.llair"'`; only inputs that round-tripped cleanly at both levels were used, 5 of 43 (see *Corpus finding* below), across 10 reps each:
+
+- **`finalizeLibrary`**: O0 median 9.5µs / p90 24.1µs (n=38) vs O3 median 247.8µs / p90 504.2µs (n=32) — O3 is ~26x slower, entirely the cost of actually running the optimizer.
+- **`makeLibrary`** (finalize + `WriteMetalLibToFile`): O0 median 65.7µs / p90 146.9µs (n=38) vs O3 median 335.0µs / p90 590.2µs (n=32) — ~5x slower at O3, diluted by the fixed writer cost.
+- **`newLibraryWithData`**: O0 median 1.0µs / p90 1.5µs (n=38) vs O3 median 1.0µs / p90 1.6µs (n=32) — no measurable difference. The Metal driver defers real AGX compilation past container load, so this call is insensitive to the AIR's optimization level.
+
+(3) was measured on the live renderer, not a proxy: `xctrace record --template "Metal System Trace" --launch -- examples/sg/triangle` with `BOURBON_METALLIB_OPT=3` and `=0`, two independent 6-second recordings per level, GPU-interval durations summed per `gpu-frame-number` and filtered to the `triangle` process via the `metal-gpu-intervals` table (`xctrace export`):
+
+- Recording 1: O3 median 1.673ms / p90 2.084ms (554 frames) vs O0 median 1.931ms / p90 2.232ms (389 frames).
+- Recording 2: O3 median 1.800ms / p90 2.135ms (508 frames) vs O0 median 2.060ms / p90 2.384ms (657 frames).
+- O0 is ~13–16% slower per frame than O3 on the GPU timeline, consistently across both recordings.
+
+**Gate result.** Frame time is not unchanged — O0 regresses it. Per the doc's decision rule, the pipeline is **kept**: `opt_level` stays defaulted to `3` (already true of the landed parameter; no further code change). `makeLibrary`/`finalizeLibrary` wall time is real but small in absolute terms (hundreds of µs, off the interactive-rebinding critical path relative to the driver's own AGX compile), and `newLibraryWithData` is unaffected either way — the entire measured cost of keeping O3 is upfront CPU time in `finalizeLibrary`, paid back by faster GPU execution every frame thereafter. This also means B3/B4's premise — that pre-shrinking via inlining before the per-entry split compounds into a real win — is not undercut by this milestone.
+
+**Corpus finding (out of scope, flagged for backlog).** Only 5 of 43 captured permutations (`-0`, `-1`, `-8`, `-10`, `-31`) round-tripped through `llair-metallib` at both O0 and O3; most crash non-deterministically (`SIGBUS`/`SIGSEGV`, confirmed via `lldb`) inside vendored `ModuleBitcodeWriter::writeMetadataStrings`, called from `WriteBitcodeToFile140` from `WriteMetalLibToFile`'s own internal bitcode write — reproducible at both opt levels for the same input (ruling out an `OptLevel`-dependent cause) but flaky across repeated runs of the identical input (ruling out a purely content-triggered cause; points at uninitialized/dangling memory over malformed metadata, plausibly the same "invalid debug info version (0)" condition every captured module warns about on read-back). Out of scope here per the doc's vendored-`floor_llvm` constraint; added to *Correctness backlog* below.
 
 ## B3 — Reachability-filtered per-entry clone
 
@@ -279,6 +297,7 @@ Independent, cheap, no ordering constraints:
 - `s_once_metadata_names` is a `std::set<StringRef>` of six entries — `StringSwitch` or a sorted array.
 - `<llair/IR/Module.h>` is included twice in `Linker.cpp`.
 - `makeLibrary(const llvm::Module &)` const_casts and the writer mutates the argument — `setSDKVersion`, named metadata erasure, `DIFile` operand replacement. The clone in `finalizeLibrary` is therefore load-bearing for source preservation and must not be removed as "redundant," whatever B2 decides about the pass pipeline.
+- **Found during B2.** Vendored `ModuleBitcodeWriter::writeMetadataStrings` (reached via `WriteBitcodeToFile140` from inside `WriteMetalLibToFile`) crashes non-deterministically (`SIGBUS`/`SIGSEGV`) on most real permutations captured from `examples/sg/triangle`/`sdf3ds` (5 of 43 survived at both O0 and O3), independent of `OptLevel`. Every affected module warns "ignoring debug info with an invalid version (0)" on bitcode read-back; likely cause, not confirmed. Out of scope for B2 per the vendored-`floor_llvm` constraint.
 
 ## Validation
 
@@ -288,7 +307,7 @@ Rendered-image comparison is the backstop and the weakest signal: a duplicated `
 
 ## Ordering
 
-B1 first, before anything else in either series — it is one call, and its outcome determines whether Series B or Series A dominates. **Done (2026-08-14): predicate was false on Bourbon's real IR, so B1 did not resolve that question — move to B2 next.** B2 and B4's gates are measurements that should also precede the milestones they inform. A0 is retracted (see above); A1–A4 are independent of both series' outcomes and can proceed in parallel.
+B1 first, before anything else in either series — it is one call, and its outcome determines whether Series B or Series A dominates. **Done (2026-08-14): predicate was false on Bourbon's real IR, so B1 did not resolve that question — move to B2 next.** B2 and B4's gates are measurements that should also precede the milestones they inform. **Done (2026-08-24): frame time regresses at O0, so the pipeline is kept at O3 — move to B3 next.** A0 is retracted (see above); A1–A4 are independent of both series' outcomes and can proceed in parallel.
 
 ## Risks
 
