@@ -18,12 +18,18 @@ int popen2(char const *path, char * const argv[], struct popen2 *childinfo) {
   if(p == 0) { /* child */
     close(pipe_stdin[1]);
     dup2(pipe_stdin[0], 0);
+    close(pipe_stdin[0]);
     close(pipe_stdout[0]);
     dup2(pipe_stdout[1], 1);
+    close(pipe_stdout[1]);
     execv(path, argv);
     fprintf(stderr,"execl of '%s' failed with error: %s\n",
 	    path, strerror(errno)); exit(99);
   }
+  /* Close the ends used only by the child. The parent must not keep the
+     stdout write end open, or read() on from_child never sees EOF. */
+  close(pipe_stdin[0]);
+  close(pipe_stdout[1]);
   childinfo->child_pid = p;
   childinfo->to_child = pipe_stdin[1];
   childinfo->from_child = pipe_stdout[0];

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 
+#include <cerrno>
 #include <unistd.h>
 
 namespace llair {
@@ -19,16 +20,22 @@ getMemoryBufferForStream(int FD, const llvm::Twine &BufferName) {
     llvm::SmallString<ChunkSize> Buffer;
     ssize_t                      size = 0, nread;
 
+    // read() on a pipe may return a short count at any time; only a return of
+    // 0 signals end-of-stream. Stopping on a short read would truncate the
+    // bitcode and crash the lazy reader downstream.
     do {
         Buffer.resize_for_overwrite(size + ChunkSize);
         nread = read(FD, Buffer.begin() + size, ChunkSize);
 
         if (nread == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
             return std::error_code(errno, std::generic_category());
         }
 
         size += nread;
-    } while (nread == ChunkSize);
+    } while (nread != 0);
 
     Buffer.truncate(size);
 
