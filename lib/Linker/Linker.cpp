@@ -35,9 +35,13 @@ namespace llair {
 namespace {
 
 // The canonical identity of a C++ struct/class type as encoded in an LLVM
-// identified-struct name: strip the `struct.`/`class.` prefix and the numeric
+// identified-struct name: strip the `struct.`/`class.` prefix and every numeric
 // `.N` suffix LLVM appends to disambiguate a name colliding with one already in
-// the context. Returns `None` for names that don't fit the pattern.
+// the context. Suffixes accumulate -- a module whose own types were already
+// disambiguated at build time gains a second one when it is loaded alongside a
+// sibling -- so stripping only the last leaves `_texture_2d_t.12` and
+// `_texture_2d_t` as distinct identities. Returns `None` for names that don't
+// fit the pattern.
 llvm::Optional<llvm::StringRef>
 canonicalStructIdentifier(llvm::StringRef name) {
     llvm::StringRef rest = name;
@@ -46,12 +50,18 @@ canonicalStructIdentifier(llvm::StringRef name) {
         return llvm::None;
     }
 
-    auto dot = rest.rfind('.');
-    if (dot != llvm::StringRef::npos) {
-        auto suffix = rest.substr(dot + 1);
-        if (!suffix.empty() && suffix.find_first_not_of("0123456789") == llvm::StringRef::npos) {
-            rest = rest.substr(0, dot);
+    for (;;) {
+        auto dot = rest.rfind('.');
+        if (dot == llvm::StringRef::npos) {
+            break;
         }
+
+        auto suffix = rest.substr(dot + 1);
+        if (suffix.empty() || suffix.find_first_not_of("0123456789") != llvm::StringRef::npos) {
+            break;
+        }
+
+        rest = rest.substr(0, dot);
     }
 
     if (rest.empty() || !(std::isalpha((unsigned char)rest[0]) || rest[0] == '_')) {
