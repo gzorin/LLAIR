@@ -26,8 +26,6 @@ class Type;
 
 namespace llair {
 
-class Class;
-class Interface;
 class LLAIRContext;
 class Module;
 
@@ -53,7 +51,6 @@ private:
 
 void linkModules(Module *, const Module *);
 void linkModules(Module *, const Module *, LinkerTypeCache&);
-void finalizeInterfaces(Module *, llvm::ArrayRef<Interface *>, std::function<uint32_t(const Class*)>);
 
 class Linker {
 public:

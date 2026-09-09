@@ -1,16 +1,12 @@
-#include <llair/IR/EntryPoint.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Tools/MakeLibrary.h>
-#include <llair/Tools/Program.h>
 
-#include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/Path.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
@@ -18,8 +14,6 @@
 
 #include <iostream>
 #include <string>
-
-#include "ToolsImpl.h"
 
 #if __has_include(<os/signpost.h>)
 #include <os/signpost.h>
@@ -123,80 +117,6 @@ makeLibrary(const Module &module, unsigned opt_level) {
 #endif
 
     return result;
-}
-
-namespace {
-
-std::unique_ptr<llvm::Module>
-finalizeLibraryForLLD(const Module& module) {
-    llvm::StringSet gvs;
-
-    std::for_each(
-        module.entry_point_begin(), module.entry_point_end(),
-        [&gvs](const auto& entry_point) -> void {
-            gvs.insert(entry_point.getFunction()->getName());
-        });
-
-#if LLVM_VERSION_MAJOR >= 8
-    auto finalized_module = llvm::CloneModule(*module.getLLModule());
-#else
-    auto finalized_module =  llvm::CloneModule(module.getLLModule());
-#endif
-
-    if (auto class_md = finalized_module->getNamedMetadata("llair.class"); class_md) {
-        finalized_module->eraseNamedMetadata(class_md);
-    }
-
-    llvm::legacy::PassManager mpm;
-
-    mpm.add(llvm::createInternalizePass([&gvs](const llvm::GlobalValue& gv) -> bool {
-        return gvs.count(gv.getName()) == 1;
-    }));
-
-    mpm.add(llvm::createGlobalDCEPass());
-
-    mpm.run(*finalized_module);
-
-    return finalized_module;
-}
-
-}
-
-llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-makeLibraryWithLLD(const llvm::Module &module) {
-    auto path     = getPathToTools();
-    auto filename = llvm::sys::path::filename(path).str();
-
-    llvm::ArrayRef<std::string> args = {filename.data(), "air-lld", "--macos_version_min", "14.0", "-o", "-", "/dev/stdin"};
-
-#if LLVM_VERSION_MAJOR >= 12
-    auto program = llvm::errorOrToExpected(openProgram((std::string)path, args));
-#else
-    auto program = llvm::errorOrToExpected(openProgram(path.str(), args));
-#endif
-
-    if (program) {
-        // Write the module:
- #if LLVM_VERSION_MAJOR >= 8
-        llvm::WriteBitcodeToFile(module, *program->input);
-#else
-        llvm::WriteBitcodeToFile(&module, *program->input);
-#endif
-        program->input->close();
-
-        // Read output:
-        return llvm::errorOrToExpected(getMemoryBufferForStream(program->output, ""));
-    }
-    else {
-        return program.takeError();
-    }
-}
-
-llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-makeLibraryWithLLD(const Module &module) {
-    auto finalized_module = finalizeLibraryForLLD(module);
-
-    return makeLibraryWithLLD(*finalized_module);
 }
 
 } // namespace llair

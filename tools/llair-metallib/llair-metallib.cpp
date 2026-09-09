@@ -1,8 +1,5 @@
 #include <llair/Bitcode/Bitcode.h>
-#include <llair/IR/Class.h>
-#include <llair/IR/Dispatcher.h>
 #include <llair/IR/EntryPoint.h>
-#include <llair/IR/Interface.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
@@ -78,19 +75,6 @@ main(int argc, char **argv) {
         [&output, &type_cache](auto &input_module) -> void {
             linkModules(output.get(), input_module.get(), type_cache);
         });
-
-    auto interfaces = output->getAllInterfacesFromABI();
-
-    llvm::StringMap<uint32_t> class_kinds;
-
-    finalizeInterfaces(output.get(), interfaces, [&class_kinds](const Class *klass) -> uint32_t {
-        auto it = class_kinds.find(klass->getName());
-        if (it == class_kinds.end()) {
-            it = class_kinds.insert({ klass->getName(), class_kinds.size() }).first;
-        }
-
-        return it->second;
-    });
 
     auto output_ll = finalizeLibrary(*output, opt_level);
 

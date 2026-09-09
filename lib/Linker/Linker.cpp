@@ -1,8 +1,5 @@
 #include <llair/IR/Module.h>
-#include <llair/IR/Class.h>
-#include <llair/IR/Dispatcher.h>
 #include <llair/IR/EntryPoint.h>
-#include <llair/IR/Interface.h>
 #include <llair/Linker/Linker.h>
 #include <llair/IR/Module.h>
 
@@ -185,66 +182,6 @@ void
 linkModules(llair::Module *dst, const llair::Module *src) {
     LinkerTypeCache type_cache;
     linkModules(dst, src, type_cache);
-}
-
-void
-finalizeInterfaces(Module *module, llvm::ArrayRef<Interface *> interfaces, std::function<uint32_t(const Class*)> getKindForClass) {
-    auto dispatcher_module = std::make_unique<Module>("", module->getContext());
-
-    llvm::StringMap<llvm::DenseSet<Interface *>> interface_index;
-
-    std::for_each(
-        interfaces.begin(), interfaces.end(),
-        [&interface_index](auto interface) -> void {
-            std::for_each(
-                interface->method_begin(), interface->method_end(),
-                [&interface_index, interface](const auto& method) -> void {
-                    interface_index[method.getName()].insert(interface);
-                });
-        });
-
-    llvm::DenseMap<llvm::StructType *, Interface *> interfaces_by_type;
-
-    std::for_each(
-        module->class_begin(), module->class_end(),
-        [getKindForClass, &dispatcher_module, &interface_index, &interfaces_by_type](const auto& klass) -> void {
-            // Find all interfaces that match `klass`:
-            llvm::DenseMap<Interface *, std::size_t> implemented_method_count;
-
-            std::for_each(
-                klass.method_begin(), klass.method_end(),
-                [&interface_index, &implemented_method_count](const auto& method) {
-                    auto it = interface_index.find(method.getName());
-                    if (it == interface_index.end()) {
-                        return;
-                    }
-
-                    std::for_each(
-                        it->second.begin(), it->second.end(),
-                        [&implemented_method_count](auto interface) {
-                            implemented_method_count[interface]++;
-                        });
-                });
-
-            std::for_each(
-                implemented_method_count.begin(), implemented_method_count.end(),
-                [getKindForClass, &dispatcher_module, &interfaces_by_type, &klass](auto tmp) {
-                    auto [ interface, implemented_method_count ] = tmp;
-                    if (implemented_method_count != interface->method_size()) {
-                        return;
-                    }
-
-                    auto r_dispatchers = dispatcher_module->getOrInsertDispatchers(interface);
-                    assert(r_dispatchers.first != r_dispatchers.second);
-
-                    auto dispatcher = *r_dispatchers.first;
-                    dispatcher->insertImplementation(getKindForClass(&klass), &klass);
-
-                    interfaces_by_type.insert({ interface->getType(), interface });
-                });
-        });
-
-    linkModules(module, dispatcher_module.get());
 }
 
 class Linker::TypeMapper : public llvm::ValueMapTypeRemapper {
