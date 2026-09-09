@@ -15,7 +15,7 @@ target_compile_features(LLAIRTools PRIVATE cxx_std_17)
 
 llvm_map_components_to_libnames(LLVM_LIBRARIES support bitreader bitwriter passes metallib bitwriter50)
 
-target_link_libraries(LLAIRTools LLAIR ${LLVM_LIBRARIES})
+target_link_libraries(LLAIRTools LLAIR LLAIRBitcode ${LLVM_LIBRARIES})
 
 install(
   TARGETS LLAIRTools

@@ -1,6 +1,7 @@
 #include <llair/IR/Module.h>
 #include <llair/IR/EntryPoint.h>
 #include <llair/Linker/Linker.h>
+#include <llair/Support/Signpost.h>
 #include <llair/IR/Module.h>
 
 #include <llvm/ADT/DenseSet.h>
@@ -288,6 +289,13 @@ Linker::linkModule(const Module *src) {
     auto New = d_dst.getLLModule();
     auto M   = src->getLLModule();
 
+#if LLAIR_HAVE_SIGNPOST
+    auto signpost_log = signpostLog();
+    auto signpost_id  = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "Linker::linkModule", "src=%s",
+                               M->getModuleIdentifier().c_str());
+#endif
+
     // Map global values declared in 'src' to global values defined in 'dst':
     llvm::DenseMap<const llvm::GlobalValue *, llvm::GlobalValue *> src_to_dst_global_value_map;
 
@@ -506,6 +514,10 @@ Linker::linkModule(const Module *src) {
         for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
             NewNMD->addOperand(MapMetadata(NMD.getOperand(i), VMap, RF_None, TMap.get()));
     }
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "Linker::linkModule");
+#endif
 }
 
 void
@@ -724,6 +736,13 @@ void
 Linker::resolve() {
     auto New = d_dst.getLLModule();
 
+#if LLAIR_HAVE_SIGNPOST
+    auto signpost_log = signpostLog();
+    auto signpost_id  = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "Linker::resolve", "modules=%zu",
+                               d_modules.size());
+#endif
+
     // Seed roots from every registered module: entry points, llvm.used /
     // llvm.compiler.used, and air.static_init constructors. Explicit require()s
     // are already queued.
@@ -767,6 +786,10 @@ Linker::resolve() {
     d_pending_ctors.clear();
 
     copyNamedMetadata();
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "Linker::resolve");
+#endif
 }
 
 void

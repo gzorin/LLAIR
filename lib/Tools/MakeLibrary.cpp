@@ -1,9 +1,12 @@
+#include <llair/Bitcode/Bitcode.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
+#include <llair/Support/Signpost.h>
 #include <llair/Tools/MakeLibrary.h>
 
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
@@ -12,34 +15,55 @@
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <string>
-
-#if __has_include(<os/signpost.h>)
-#include <os/signpost.h>
-#define LLAIR_HAVE_SIGNPOST 1
-#endif
 
 namespace llair {
 
 namespace {
 
+// Prices the bitcode boundary an off-thread compile would impose: serialize the
+// module and parse it back into a private context, then discard the result. Off
+// unless LLAIR_MEASURE_ROUNDTRIP is set -- it is pure overhead.
+void
+measureBitcodeRoundTrip(const Module& module) {
+    if (!std::getenv("LLAIR_MEASURE_ROUNDTRIP")) {
+        return;
+    }
+
 #if LLAIR_HAVE_SIGNPOST
-// Points-of-Interest category so intervals show up in Instruments' Points of
-// Interest track without a custom template.
-os_log_t
-metallibSignpostLog() {
-    static os_log_t log = os_log_create("com.bourbon.llair", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
-    return log;
-}
+    auto signpost_log = signpostLog();
+    auto signpost_id  = os_signpost_id_generate(signpost_log);
+    os_signpost_interval_begin(signpost_log, signpost_id, "bitcodeRoundTrip");
 #endif
+
+    std::string              bitcode;
+    llvm::raw_string_ostream os(bitcode);
+    llvm::WriteBitcodeToFile(*module.getLLModule(), os);
+    os.flush();
+
+    // A private context, as a session would use: parsing into the module's own
+    // context would clone its identified structs under disambiguated names.
+    llvm::LLVMContext ll_context;
+    LLAIRContext      context(ll_context);
+
+    auto parsed = getBitcodeModule(llvm::MemoryBufferRef(bitcode, "roundtrip"), context);
+    if (!parsed) {
+        llvm::consumeError(parsed.takeError());
+    }
+
+#if LLAIR_HAVE_SIGNPOST
+    os_signpost_interval_end(signpost_log, signpost_id, "bitcodeRoundTrip");
+#endif
+}
 
 }
 
 std::unique_ptr<llvm::Module>
 finalizeLibrary(const Module& module, unsigned opt_level) {
 #if LLAIR_HAVE_SIGNPOST
-    auto signpost_log = metallibSignpostLog();
+    auto signpost_log = signpostLog();
     auto signpost_id  = os_signpost_id_generate(signpost_log);
     os_signpost_interval_begin(signpost_log, signpost_id, "finalizeLibrary", "opt_level=%u", opt_level);
 #endif
@@ -102,8 +126,10 @@ makeLibrary(const llvm::Module &module) {
 
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
 makeLibrary(const Module &module, unsigned opt_level) {
+    measureBitcodeRoundTrip(module);
+
 #if LLAIR_HAVE_SIGNPOST
-    auto signpost_log = metallibSignpostLog();
+    auto signpost_log = signpostLog();
     auto signpost_id  = os_signpost_id_generate(signpost_log);
     os_signpost_interval_begin(signpost_log, signpost_id, "makeLibrary", "opt_level=%u", opt_level);
 #endif
