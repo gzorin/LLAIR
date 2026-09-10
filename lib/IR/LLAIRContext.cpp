@@ -5,6 +5,7 @@
 #include "LLAIRContextImpl.h"
 
 #include <map>
+#include <mutex>
 
 namespace llair {
 
@@ -21,6 +22,14 @@ LLAIRContextImpl::~LLAIRContextImpl() {}
 namespace {
 namespace contexts {
 
+// The registry is process-global, so concurrent sessions -- each building its
+// own LLAIRContext on its own thread -- mutate it at once. Guard every access.
+std::mutex &
+mutex() {
+    static std::mutex s_mutex;
+    return s_mutex;
+}
+
 std::map<llvm::LLVMContext *, LLAIRContext *> &
 llvm_to_llair() {
     static std::map<llvm::LLVMContext *, LLAIRContext *> s_llvm_to_llair;
@@ -32,22 +41,26 @@ llvm_to_llair() {
 
 const LLAIRContext *
 LLAIRContext::Get(const llvm::LLVMContext *llcontext) {
+    std::lock_guard<std::mutex> lock(contexts::mutex());
     auto it = contexts::llvm_to_llair().find(const_cast<llvm::LLVMContext *>(llcontext));
     return it != contexts::llvm_to_llair().end() ? it->second : nullptr;
 }
 
 LLAIRContext *
 LLAIRContext::Get(llvm::LLVMContext *llcontext) {
+    std::lock_guard<std::mutex> lock(contexts::mutex());
     auto it = contexts::llvm_to_llair().find(llcontext);
     return it != contexts::llvm_to_llair().end() ? it->second : nullptr;
 }
 
 LLAIRContext::LLAIRContext(llvm::LLVMContext &llcontext)
     : d_impl(new LLAIRContextImpl(llcontext)) {
+    std::lock_guard<std::mutex> lock(contexts::mutex());
     contexts::llvm_to_llair().insert(std::make_pair(&llcontext, this));
 }
 
 LLAIRContext::~LLAIRContext() {
+    std::lock_guard<std::mutex> lock(contexts::mutex());
     contexts::llvm_to_llair().erase(&d_impl->getLLContext());
 }
 

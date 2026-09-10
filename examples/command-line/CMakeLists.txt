@@ -22,7 +22,7 @@ add_executable(
 
 target_link_libraries(
   llair-test
-  LLAIR LLAIRLinker
+  LLAIR LLAIRLinker LLAIRTools LLAIRBitcode
   ${llvm_libs}
 )
 

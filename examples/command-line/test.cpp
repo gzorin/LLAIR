@@ -2,6 +2,7 @@
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
 #include <llair/Linker/Linker.h>
+#include <llair/Tools/CompileSession.h>
 
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -30,6 +31,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
@@ -985,6 +987,132 @@ testBuildEntryModulePreservesStaticInitCtor() {
     std::cerr << "testBuildEntryModulePreservesStaticInitCtor: OK" << std::endl;
 }
 
+// A distinct compute-kernel module for the concurrency gate: a void() entry
+// named "entry_<i>" registered in air.kernel. The distinct name keeps each
+// module's metallib distinct even after optimization folds the trivial bodies.
+std::unique_ptr<llair::Module>
+buildKernelModule(llair::LLAIRContext &context, unsigned i) {
+    auto  module = std::make_unique<llair::Module>("mod_" + std::to_string(i), context);
+    auto *m      = module->getLLModule();
+
+    auto *entry = createSimpleFunction(*m, "entry_" + std::to_string(i),
+                                       llvm::GlobalValue::ExternalLinkage);
+
+    auto *ep = llair::ComputeEntryPoint::Create(entry, module.get());
+    m->getOrInsertNamedMetadata("air.kernel")->addOperand(ep->metadata());
+
+    return module;
+}
+
+// X2 gate: N sessions compiling distinct modules at once produce output that
+// matches compiling each alone, and the machinery is race-free (the point of
+// running this under TSan and ASan). Each source gets its own context, so the
+// bitcode serialization a worker's addModule performs never reads a context
+// another thread is touching.
+//
+// The metallib writer stamps every program with a fresh random UUID and a hash
+// taken over it, so its output is not reproducible byte-for-byte even across two
+// serial compiles of the same module. The check below is therefore differential:
+// several serial passes reveal which byte positions the writer leaves
+// nondeterministic (a position is treated as stable only if every serial sample
+// agrees there -- two samples would let a random byte pass as stable by chance),
+// and the concurrent output is allowed to differ from a serial baseline only at
+// unstable positions. A session leaking another's content would move a stable
+// byte and be caught.
+void
+testConcurrentSessionsMatchSerialModuloWriterNondeterminism() {
+    constexpr unsigned N       = 8;
+    constexpr unsigned kSerial = 8; // serial samples used to find stable bytes
+
+    std::vector<std::unique_ptr<llvm::LLVMContext>>   llcontexts;
+    std::vector<std::unique_ptr<llair::LLAIRContext>> contexts;
+    std::vector<std::unique_ptr<llair::Module>>       sources;
+
+    for (unsigned i = 0; i < N; ++i) {
+        llcontexts.push_back(std::make_unique<llvm::LLVMContext>());
+        contexts.push_back(std::make_unique<llair::LLAIRContext>(*llcontexts.back()));
+        sources.push_back(buildKernelModule(*contexts.back(), i));
+    }
+
+    auto compile_one = [](llair::CompilePool &pool, llair::Module &src) {
+        auto session =
+            llair::CompileSession::Create(pool, src.getLLModule()->getModuleIdentifier());
+        session->addModule(src);
+        auto result = session->compile(3).get();
+        assert(result.metallib && result.error.empty() && "compile failed");
+        return result.metallib->getBuffer().str();
+    };
+
+    // Serial samples, one session at a time. The first pass is also the wall
+    // time to beat with the concurrent pass below.
+    std::vector<std::vector<std::string>> serial(kSerial, std::vector<std::string>(N));
+    double serial_ms = 0.0;
+    for (unsigned s = 0; s < kSerial; ++s) {
+        auto               t0 = std::chrono::steady_clock::now();
+        llair::CompilePool pool;
+        for (unsigned i = 0; i < N; ++i) {
+            serial[s][i] = compile_one(pool, *sources[i]);
+        }
+        if (s == 0) {
+            serial_ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+        }
+    }
+
+    // Concurrent: N threads, each driving its own session; the pool bounds how
+    // many compiles run at once, and Create() blocks a thread until a slot frees.
+    std::vector<std::string> concurrent(N);
+    double                    concurrent_ms = 0.0;
+    {
+        auto                     t0 = std::chrono::steady_clock::now();
+        llair::CompilePool       pool;
+        std::vector<std::thread> threads;
+        for (unsigned i = 0; i < N; ++i) {
+            threads.emplace_back([&, i] { concurrent[i] = compile_one(pool, *sources[i]); });
+        }
+        for (auto &t : threads) {
+            t.join();
+        }
+        concurrent_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                .count();
+    }
+
+    std::cerr << "testConcurrentSessionsMatchSerialModuloWriterNondeterminism: " << N
+              << " modules serial=" << serial_ms << "ms concurrent=" << concurrent_ms << "ms ("
+              << (serial_ms / concurrent_ms) << "x)" << std::endl;
+
+    for (unsigned i = 0; i < N; ++i) {
+        const auto &baseline = serial[0][i];
+        assert(!baseline.empty());
+        assert(concurrent[i].size() == baseline.size());
+
+        for (std::size_t p = 0; p < baseline.size(); ++p) {
+            bool stable = true;
+            for (unsigned s = 1; s < kSerial && stable; ++s) {
+                assert(serial[s][i].size() == baseline.size());
+                stable = serial[s][i][p] == baseline[p];
+            }
+
+            if (stable) {
+                assert(concurrent[i][p] == baseline[p] &&
+                       "concurrent output diverged at a deterministic byte");
+            }
+        }
+    }
+
+    // Distinct modules yield distinct output, so a leak between sessions would be
+    // visible to the per-position check above.
+    for (unsigned i = 0; i < N; ++i) {
+        for (unsigned j = i + 1; j < N; ++j) {
+            assert(serial[0][i] != serial[0][j]);
+        }
+    }
+
+    std::cerr << "testConcurrentSessionsMatchSerialModuloWriterNondeterminism: OK" << std::endl;
+}
+
 } // namespace
 
 int
@@ -1014,4 +1142,5 @@ main(int argc, const char **argv) {
     testBuildEntryModuleCostScalesWithReachableSet();
     testBuildEntryModuleDisjointFunctionConstants();
     testBuildEntryModulePreservesStaticInitCtor();
+    testConcurrentSessionsMatchSerialModuloWriterNondeterminism();
 }

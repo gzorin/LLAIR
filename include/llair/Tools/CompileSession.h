@@ -43,8 +43,19 @@ using MakeLibraryCompletionHandler =
 // types, so a module handed in by reference would tie the session to its
 // author's thread.
 //
-// A session compiles once. In this form the work runs on the thread that asks
-// for it; the boundary is what lets the work move.
+// The compile runs on the session's own serial queue, never on the caller's
+// thread. Because the parse target is the session's private context, nothing
+// bound to that context is ever reachable from another thread, so sessions run
+// concurrently with no shared mutable state between them.
+//
+// A multi-input session links its modules with a fresh, session-local
+// LinkerTypeCache. That is safe precisely because the context is virgin: the
+// cache hazard is mixing a fresh cache with modules a *different* cache already
+// remapped in the same context, and here every module in the context arrives
+// through this one cache, so struct canonicalization is uniform.
+//
+// A session compiles once. The caller must keep it alive until the compile
+// completes -- the async work holds the session by raw pointer.
 class CompileSession {
 public:
 
@@ -77,6 +88,8 @@ private:
     llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> run(unsigned opt_level);
 
     CompilePool& d_pool;
+
+    dispatch_queue_t d_queue;   // serial; the compile runs here, one per session
 
     std::string              d_name;
     std::string              d_label;   // what diagnostics call this session

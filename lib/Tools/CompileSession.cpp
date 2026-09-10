@@ -92,11 +92,13 @@ CompilePool::release() {
 
 CompileSession::CompileSession(CompilePool& pool, llvm::StringRef name)
     : d_pool(pool)
+    , d_queue(dispatch_queue_create("com.bourbon.llair.compile-session", DISPATCH_QUEUE_SERIAL))
     , d_name(name.str())
     , d_label(name.empty() ? std::string("<unnamed>") : name.str()) {
 }
 
 CompileSession::~CompileSession() {
+    dispatch_release(d_queue);
     d_pool.release();
 }
 
@@ -187,40 +189,50 @@ CompileSession::compileAsync(unsigned opt_level, dispatch_queue_t reply_queue,
         MakeLibraryCompletionHandler        handler;
     };
 
-    auto result = run(opt_level);
+    // reply_queue outlives the deferred work only if we hold a reference to it;
+    // the caller's own reference may be gone by the time this block runs.
+    dispatch_retain(reply_queue);
 
-    std::shared_ptr<Reply> reply(
-        new Reply{nullptr, llvm::Error::success(), std::move(handler)});
+    dispatch_async(d_queue, ^{
+        auto result = run(opt_level);
 
-    if (result) {
-        reply->metallib = std::move(*result);
-    }
-    else {
-        reply->error = result.takeError();
-    }
+        std::shared_ptr<Reply> reply(
+            new Reply{nullptr, llvm::Error::success(), handler});
 
-    dispatch_async(reply_queue, ^{
-        reply->handler(std::move(reply->metallib), std::move(reply->error));
+        if (result) {
+            reply->metallib = std::move(*result);
+        }
+        else {
+            reply->error = result.takeError();
+        }
+
+        dispatch_async(reply_queue, ^{
+            reply->handler(std::move(reply->metallib), std::move(reply->error));
+        });
+
+        dispatch_release(reply_queue);
     });
 }
 
 std::shared_future<CompileResult>
 CompileSession::compile(unsigned opt_level) {
-    std::promise<CompileResult> promise;
-    auto                        future = promise.get_future().share();
+    auto promise = std::make_shared<std::promise<CompileResult>>();
+    auto future  = promise->get_future().share();
 
-    auto result = run(opt_level);
+    dispatch_async(d_queue, ^{
+        auto result = run(opt_level);
 
-    CompileResult value;
+        CompileResult value;
 
-    if (result) {
-        value.metallib = std::move(*result);
-    }
-    else {
-        value.error = llvm::toString(result.takeError());
-    }
+        if (result) {
+            value.metallib = std::move(*result);
+        }
+        else {
+            value.error = llvm::toString(result.takeError());
+        }
 
-    promise.set_value(std::move(value));
+        promise->set_value(std::move(value));
+    });
 
     return future;
 }
