@@ -60,27 +60,21 @@ measureBitcodeRoundTrip(const Module& module) {
 
 }
 
-std::unique_ptr<llvm::Module>
-finalizeLibrary(const Module& module, unsigned opt_level) {
+void
+finalizeLibrary(llvm::Module& finalized_module, unsigned opt_level) {
 #if LLAIR_HAVE_SIGNPOST
     auto signpost_log = signpostLog();
     auto signpost_id  = os_signpost_id_generate(signpost_log);
     os_signpost_interval_begin(signpost_log, signpost_id, "finalizeLibrary", "opt_level=%u", opt_level);
 #endif
 
-#if LLVM_VERSION_MAJOR >= 8
-    auto finalized_module = llvm::CloneModule(*module.getLLModule());
-#else
-    auto finalized_module =  llvm::CloneModule(module.getLLModule());
-#endif
-
-    if (auto class_md = finalized_module->getNamedMetadata("llair.class"); class_md) {
-        finalized_module->eraseNamedMetadata(class_md);
+    if (auto class_md = finalized_module.getNamedMetadata("llair.class"); class_md) {
+        finalized_module.eraseNamedMetadata(class_md);
     }
 
-    llvm::StripDebugInfo(*finalized_module);
+    llvm::StripDebugInfo(finalized_module);
 
-    llvm::legacy::FunctionPassManager fpm(finalized_module.get());
+    llvm::legacy::FunctionPassManager fpm(&finalized_module);
 
     llvm::legacy::PassManager mpm;
 
@@ -100,16 +94,27 @@ finalizeLibrary(const Module& module, unsigned opt_level) {
 
     fpm.doInitialization();
 
-    for (auto& function : *finalized_module) {
+    for (auto& function : finalized_module) {
         fpm.run(function);
     }
     fpm.doFinalization();
 
-    mpm.run(*finalized_module);
+    mpm.run(finalized_module);
 
 #if LLAIR_HAVE_SIGNPOST
     os_signpost_interval_end(signpost_log, signpost_id, "finalizeLibrary");
 #endif
+}
+
+std::unique_ptr<llvm::Module>
+finalizeLibrary(const Module& module, unsigned opt_level) {
+#if LLVM_VERSION_MAJOR >= 8
+    auto finalized_module = llvm::CloneModule(*module.getLLModule());
+#else
+    auto finalized_module = llvm::CloneModule(module.getLLModule());
+#endif
+
+    finalizeLibrary(*finalized_module, opt_level);
 
     return finalized_module;
 }

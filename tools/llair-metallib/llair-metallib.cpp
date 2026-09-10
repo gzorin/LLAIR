@@ -2,8 +2,7 @@
 #include <llair/IR/EntryPoint.h>
 #include <llair/IR/LLAIRContext.h>
 #include <llair/IR/Module.h>
-#include <llair/Linker/Linker.h>
-#include <llair/Tools/MakeLibrary.h>
+#include <llair/Tools/CompileSession.h>
 
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -51,32 +50,26 @@ main(int argc, char **argv) {
     auto llvm_context  = std::make_unique<llvm::LLVMContext>();
     auto llair_context = std::make_unique<llair::LLAIRContext>(*llvm_context);
 
-    std::vector<std::unique_ptr<llair::Module>> input_modules;
+    llair::CompilePool pool;
 
-    std::transform(
+    auto session = llair::CompileSession::Create(pool, output_filename);
+
+    std::for_each(
         input_filenames.begin(), input_filenames.end(),
-        std::back_inserter(input_modules),
-        [&exit_on_err, &llair_context](auto input_filename) -> std::unique_ptr<llair::Module> {
+        [&exit_on_err, &llair_context, &session](auto input_filename) -> void {
             auto buffer =
                 exit_on_err(errorOrToExpected(llvm::MemoryBuffer::getFileOrSTDIN(input_filename)));
             auto module = exit_on_err(
                 llair::getBitcodeModule(llvm::MemoryBufferRef(*buffer), *llair_context));
-            return module;
+            session->addModule(*module);
         });
 
-    auto output = std::make_unique<llair::Module>(output_filename, *llair_context);
+    auto result = session->compile(opt_level).get();
 
-    // All inputs link into one output and share struct identity; reuse one
-    // cache across the batch so canonicalization persists between links.
-    llair::LinkerTypeCache type_cache;
-
-    std::for_each(
-        input_modules.begin(), input_modules.end(),
-        [&output, &type_cache](auto &input_module) -> void {
-            linkModules(output.get(), input_module.get(), type_cache);
-        });
-
-    auto output_ll = finalizeLibrary(*output, opt_level);
+    if (!result.metallib) {
+        llvm::errs() << "llair-metallib: " << result.error << "\n";
+        return 1;
+    }
 
     // Write it out:
     std::error_code                       error_code;
@@ -93,7 +86,7 @@ main(int argc, char **argv) {
         return 1;
     }
 
-    llvm::WriteMetalLibToFile(*output_ll, output_file->os());
+    output_file->os() << result.metallib->getBuffer();
     output_file->keep();
 
     return 0;
