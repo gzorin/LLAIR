@@ -14,7 +14,9 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalAlias.h>
 #include <llvm/IR/GlobalObject.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
@@ -169,6 +171,37 @@ hashDefinition(const llvm::GlobalValue &gv) {
     return llvm::xxHash64(os.str());
 }
 
+// A variation point leaves a call operand typed with an opaque placeholder while
+// the concrete caller supplies the specialized type, so after linking a direct
+// call's function type can differ from its callee's own type. The verifier and
+// in-context codegen tolerate the punning, but the bitcode reader enforces that a
+// call's explicit type equals the pointee type of its callee operand and rejects
+// the module otherwise. Route each such call through a bitcast of the callee to
+// the call's own function type -- the canonical form for a type-punned direct
+// call -- so the linked module survives a bitcode round-trip.
+void
+reconcileMismatchedCalls(llvm::Module &module) {
+    for (auto &function : module) {
+        for (auto &block : function) {
+            for (auto &inst : block) {
+                auto *call = llvm::dyn_cast<llvm::CallBase>(&inst);
+                if (!call) {
+                    continue;
+                }
+
+                auto *callee = llvm::dyn_cast<llvm::Function>(call->getCalledOperand());
+                if (!callee || call->getFunctionType() == callee->getFunctionType()) {
+                    continue;
+                }
+
+                auto *callee_type =
+                    call->getFunctionType()->getPointerTo(callee->getAddressSpace());
+                call->setCalledOperand(llvm::ConstantExpr::getBitCast(callee, callee_type));
+            }
+        }
+    }
+}
+
 } // namespace
 
 void
@@ -176,7 +209,7 @@ linkModules(llair::Module *dst, const llair::Module *src, LinkerTypeCache &type_
     Linker linker(*dst, type_cache);
     linker.linkModule(src);
 
-    dst->syncMetadata();
+    linker.syncMetadata();
 }
 
 void
@@ -522,6 +555,7 @@ Linker::linkModule(const Module *src) {
 
 void
 Linker::syncMetadata() {
+    reconcileMismatchedCalls(*d_dst.getLLModule());
     d_dst.syncMetadata();
 }
 
@@ -786,6 +820,8 @@ Linker::resolve() {
     d_pending_ctors.clear();
 
     copyNamedMetadata();
+
+    reconcileMismatchedCalls(*New);
 
 #if LLAIR_HAVE_SIGNPOST
     os_signpost_interval_end(signpost_log, signpost_id, "Linker::resolve");
