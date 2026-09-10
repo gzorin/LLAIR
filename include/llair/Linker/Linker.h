@@ -86,7 +86,9 @@ public:
     // definition's identity is the content of its linked IR, so IR-identical
     // bindings collide by design. The key omits the entry function itself: the
     // cache it feeds is partitioned per entry, within which the entry body is
-    // fixed and only the bindings vary.
+    // fixed and only the bindings vary. Computable only after resolve() has
+    // chosen definitions, so it keys the emission of an already-linked result,
+    // not the link itself.
     uint64_t permutationKey(const llvm::Function *entry_point) const;
 
 private:

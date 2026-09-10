@@ -10,9 +10,11 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/xxhash.h>
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <mutex>
 #include <thread>
 
@@ -90,6 +92,38 @@ CompilePool::release() {
     dispatch_semaphore_signal(d_slots);
 }
 
+namespace {
+
+// A coarse cap on the content cache. The working set is the distinct program
+// set, single digits in practice, so this only guards against pathological
+// growth; eviction order is arbitrary, not by use.
+constexpr std::size_t kMaxCacheEntries = 1024;
+
+} // namespace
+
+std::optional<std::string>
+CompilePool::cacheLookup(std::uint64_t content_hash, unsigned opt_level) {
+    std::lock_guard<std::mutex> lock(d_cache_mutex);
+
+    auto it = d_cache.find({content_hash, opt_level});
+    if (it == d_cache.end()) {
+        return std::nullopt;
+    }
+
+    return it->second;
+}
+
+void
+CompilePool::cacheInsert(std::uint64_t content_hash, unsigned opt_level, std::string metallib) {
+    std::lock_guard<std::mutex> lock(d_cache_mutex);
+
+    if (d_cache.size() >= kMaxCacheEntries && d_cache.find({content_hash, opt_level}) == d_cache.end()) {
+        d_cache.erase(d_cache.begin());
+    }
+
+    d_cache.insert_or_assign({content_hash, opt_level}, std::move(metallib));
+}
+
 CompileSession::CompileSession(CompilePool& pool, llvm::StringRef name)
     : d_pool(pool)
     , d_queue(dispatch_queue_create("com.bourbon.llair.compile-session", DISPATCH_QUEUE_SERIAL))
@@ -134,6 +168,21 @@ CompileSession::run(unsigned opt_level) {
 
     d_compiled = true;
 
+    // Content key over the exact inputs that determine the output: the
+    // destination name, which the metallib embeds, and each input module's
+    // bitcode. Identical inputs at the same opt level produce an identical
+    // metallib, so a hit returns the stored bytes and skips both the parse into
+    // a private context below and the finalize/emit work.
+    std::uint64_t content_hash = llvm::xxHash64(d_name);
+    for (const auto& bitcode : d_bitcode) {
+        content_hash ^= llvm::xxHash64(bitcode) + 0x9e3779b97f4a7c15ULL +
+                        (content_hash << 6) + (content_hash >> 2);
+    }
+
+    if (auto cached = d_pool.cacheLookup(content_hash, opt_level)) {
+        return llvm::MemoryBuffer::getMemBufferCopy(*cached, d_label);
+    }
+
     d_ll_context = std::make_unique<llvm::LLVMContext>();
     d_context    = std::make_unique<LLAIRContext>(*d_ll_context);
 
@@ -177,7 +226,14 @@ CompileSession::run(unsigned opt_level) {
 
     finalizeLibrary(*finalized, opt_level);
 
-    return makeLibrary(*finalized);
+    auto result = makeLibrary(*finalized);
+    if (result) {
+        d_pool.cacheInsert(
+            content_hash, opt_level,
+            std::string((*result)->getBufferStart(), (*result)->getBufferSize()));
+    }
+
+    return result;
 }
 
 void

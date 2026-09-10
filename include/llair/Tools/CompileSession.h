@@ -8,10 +8,15 @@
 
 #include <dispatch/dispatch.h>
 
+#include <cstdint>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace llvm {
@@ -41,7 +46,9 @@ using MakeLibraryCompletionHandler =
 // cross the session boundary as bitcode and are parsed into that context: an
 // LLVMContext is not thread-safe, and LinkerTypeCache keys on context-owned
 // types, so a module handed in by reference would tie the session to its
-// author's thread.
+// author's thread. Because inputs and outputs cross that boundary as
+// serialized bytes, moving the compile out of process would be a transport
+// swap, not a redesign.
 //
 // The compile runs on the session's own serial queue, never on the caller's
 // thread. Because the parse target is the session's private context, nothing
@@ -122,7 +129,19 @@ private:
     void acquire();
     void release();
 
+    // Content cache: identical input bitcode at the same opt level yields an
+    // identical metallib, so a repeat compile of an unchanged program returns
+    // the stored bytes and skips optimization and emission entirely. Shared
+    // across sessions, guarded by a mutex, in-memory for the process lifetime,
+    // and coarsely bounded by entry count. Lookup returns a copy so the caller
+    // owns its buffer independently of later evictions.
+    std::optional<std::string> cacheLookup(std::uint64_t content_hash, unsigned opt_level);
+    void                       cacheInsert(std::uint64_t content_hash, unsigned opt_level, std::string metallib);
+
     dispatch_semaphore_t d_slots;
+
+    std::mutex                                              d_cache_mutex;
+    std::map<std::pair<std::uint64_t, unsigned>, std::string> d_cache;
 };
 
 } // End namespace llair
