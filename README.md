@@ -5,7 +5,7 @@ The purpose of this library is to facilitate the generation of shading programs 
 
 LLAIR specifies a few classes that model the parts of the Metal intermediate representation that extend the LLVM IR itself. 'llair::Module' is such a class: it maintains a reference to a 'llvm::Module' as well as references to Metal-specific things (such as vertex, fragment, and compute functions).
 
-The function 'llair::Tools::compileBuffer()' accepts a string containing source code in the Metal Shading Language and returns a new 'llair::Module'. The function 'llair::Tools::makeLibrary()' accepts a reference to a 'llair::Module' and returns a buffer that can be passed to the MTLDevice function 'newLibraryWithData'. Both functions are implemented by running some of the Metal command-line utilities distributed with Xcode (respectively, the 'metal' and 'metallib' utilities).
+The function 'llair::Tools::compileBuffer()' accepts a string containing source code in the Metal Shading Language and returns a new 'llair::Module'. The function 'llair::Tools::makeLibrary()' accepts a reference to a 'llvm::Module' and returns a buffer that can be passed to the MTLDevice function 'newLibraryWithData'. Both functions are implemented by running some of the Metal command-line utilities distributed with Xcode (respectively, the 'metal' and 'metallib' utilities).
 
 This project requires [this fork of LLVM][1], which is itself based on [another fork developed by Florian Ziesche][2]; among other things, that project provides the capability to emit (and disassemble) valid '.metallib' files from the application itself, & without invoking `air-lld` as a child process. The variable 'LLVM_DIR' should be set to the location of the LLVM distribution's 'LLVMConfig.cmake' when running 'cmake'.
 
