@@ -6,6 +6,9 @@
 
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -14,10 +17,12 @@
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/LoopUtils.h>
 
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace llair {
 
@@ -56,6 +61,85 @@ measureBitcodeRoundTrip(const Module& module) {
 #if LLAIR_HAVE_SIGNPOST
     os_signpost_interval_end(signpost_log, signpost_id, "bitcodeRoundTrip");
 #endif
+}
+
+// Metal's compiler has no lowering for llvm.vector.reduce.*, which the SLP
+// vectorizer forms from a fully unrolled accumulation, and crashes on it.
+// Each becomes a scalar chain in lane order, at any vector width.
+void
+expandVectorReductions(llvm::Module& module) {
+    std::vector<llvm::IntrinsicInst *> reductions;
+
+    for (auto& function : module) {
+        for (auto& instruction : llvm::instructions(function)) {
+            auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(&instruction);
+            if (!intrinsic) {
+                continue;
+            }
+
+            switch (intrinsic->getIntrinsicID()) {
+            case llvm::Intrinsic::vector_reduce_fadd:
+            case llvm::Intrinsic::vector_reduce_fmul:
+            case llvm::Intrinsic::vector_reduce_add:
+            case llvm::Intrinsic::vector_reduce_mul:
+            case llvm::Intrinsic::vector_reduce_and:
+            case llvm::Intrinsic::vector_reduce_or:
+            case llvm::Intrinsic::vector_reduce_xor:
+            case llvm::Intrinsic::vector_reduce_smax:
+            case llvm::Intrinsic::vector_reduce_smin:
+            case llvm::Intrinsic::vector_reduce_umax:
+            case llvm::Intrinsic::vector_reduce_umin:
+            case llvm::Intrinsic::vector_reduce_fmax:
+            case llvm::Intrinsic::vector_reduce_fmin:
+                reductions.push_back(intrinsic);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
+    for (auto *reduction : reductions) {
+        llvm::IRBuilder<> builder(reduction);
+        if (llvm::isa<llvm::FPMathOperator>(reduction)) {
+            builder.setFastMathFlags(reduction->getFastMathFlags());
+        }
+
+        // fadd and fmul carry a start value ahead of the vector.
+        auto id = reduction->getIntrinsicID();
+        bool has_start = id == llvm::Intrinsic::vector_reduce_fadd ||
+                         id == llvm::Intrinsic::vector_reduce_fmul;
+
+        llvm::Value *vector = reduction->getArgOperand(has_start ? 1 : 0);
+        llvm::Value *result = has_start ? reduction->getArgOperand(0) : nullptr;
+
+        auto combine = [&builder, id](llvm::Value *left, llvm::Value *right) -> llvm::Value * {
+            switch (id) {
+            case llvm::Intrinsic::vector_reduce_fadd: return builder.CreateFAdd(left, right);
+            case llvm::Intrinsic::vector_reduce_fmul: return builder.CreateFMul(left, right);
+            case llvm::Intrinsic::vector_reduce_add:  return builder.CreateAdd(left, right);
+            case llvm::Intrinsic::vector_reduce_mul:  return builder.CreateMul(left, right);
+            case llvm::Intrinsic::vector_reduce_and:  return builder.CreateAnd(left, right);
+            case llvm::Intrinsic::vector_reduce_or:   return builder.CreateOr(left, right);
+            case llvm::Intrinsic::vector_reduce_xor:  return builder.CreateXor(left, right);
+            case llvm::Intrinsic::vector_reduce_smax: return llvm::createMinMaxOp(builder, llvm::RecurKind::SMax, left, right);
+            case llvm::Intrinsic::vector_reduce_smin: return llvm::createMinMaxOp(builder, llvm::RecurKind::SMin, left, right);
+            case llvm::Intrinsic::vector_reduce_umax: return llvm::createMinMaxOp(builder, llvm::RecurKind::UMax, left, right);
+            case llvm::Intrinsic::vector_reduce_umin: return llvm::createMinMaxOp(builder, llvm::RecurKind::UMin, left, right);
+            case llvm::Intrinsic::vector_reduce_fmax: return llvm::createMinMaxOp(builder, llvm::RecurKind::FMax, left, right);
+            default:                                  return llvm::createMinMaxOp(builder, llvm::RecurKind::FMin, left, right);
+            }
+        };
+
+        unsigned count = llvm::cast<llvm::FixedVectorType>(vector->getType())->getNumElements();
+        for (unsigned i = 0; i < count; ++i) {
+            auto *lane = builder.CreateExtractElement(vector, builder.getInt32(i));
+            result = result ? combine(result, lane) : lane;
+        }
+
+        reduction->replaceAllUsesWith(result);
+        reduction->eraseFromParent();
+    }
 }
 
 }
@@ -100,6 +184,8 @@ finalizeLibrary(llvm::Module& finalized_module, unsigned opt_level) {
     fpm.doFinalization();
 
     mpm.run(finalized_module);
+
+    expandVectorReductions(finalized_module);
 
 #if LLAIR_HAVE_SIGNPOST
     os_signpost_interval_end(signpost_log, signpost_id, "finalizeLibrary");
