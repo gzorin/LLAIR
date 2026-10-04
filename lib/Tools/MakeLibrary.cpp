@@ -142,6 +142,101 @@ expandVectorReductions(llvm::Module& module) {
     }
 }
 
+bool
+isBoolVector(llvm::Type *type) {
+    auto *vector = llvm::dyn_cast<llvm::FixedVectorType>(type);
+    return vector && vector->getElementType()->isIntegerTy(1);
+}
+
+// AIR has no freeze, and Metal's compiler crashes on one (the SLP
+// vectorizer's poison-safe lowering of `a && b` makes them). Nothing
+// optimizes after this point, so each is replaced by its operand.
+void
+removeFreezes(llvm::Module& module) {
+    std::vector<llvm::FreezeInst *> freezes;
+
+    for (auto& function : module) {
+        for (auto& instruction : llvm::instructions(function)) {
+            if (auto *freeze = llvm::dyn_cast<llvm::FreezeInst>(&instruction)) {
+                freezes.push_back(freeze);
+            }
+        }
+    }
+
+    for (auto *freeze : freezes) {
+        freeze->replaceAllUsesWith(freeze->getOperand(0));
+        freeze->eraseFromParent();
+    }
+}
+
+// Metal's compiler also crashes on a bitcast of an <N x i1> to iN,
+// InstCombine's canonical vector.reduce.and/or of comparisons. An all-of,
+// any-of or none-of comparison of one becomes an and/or chain of its lanes;
+// any other use, the integer rebuilt from shifted lanes.
+void
+scalarizeBoolVectors(llvm::Module& module) {
+    std::vector<llvm::BitCastInst *> bitcasts;
+
+    for (auto& function : module) {
+        for (auto& instruction : llvm::instructions(function)) {
+            auto *bitcast = llvm::dyn_cast<llvm::BitCastInst>(&instruction);
+            if (bitcast && isBoolVector(bitcast->getSrcTy()) && bitcast->getDestTy()->isIntegerTy()) {
+                bitcasts.push_back(bitcast);
+            }
+        }
+    }
+
+    for (auto *bitcast : bitcasts) {
+        llvm::IRBuilder<> builder(bitcast);
+
+        auto *vector = bitcast->getOperand(0);
+        unsigned count = llvm::cast<llvm::FixedVectorType>(vector->getType())->getNumElements();
+
+        std::vector<llvm::Value *> lanes;
+        for (unsigned i = 0; i < count; ++i) {
+            lanes.push_back(builder.CreateExtractElement(vector, builder.getInt32(i)));
+        }
+
+        for (auto *user : llvm::make_early_inc_range(bitcast->users())) {
+            auto *compare = llvm::dyn_cast<llvm::ICmpInst>(user);
+            auto *constant = compare ? llvm::dyn_cast<llvm::ConstantInt>(compare->getOperand(1)) : nullptr;
+            if (!constant || compare->getOperand(0) != bitcast || !compare->isEquality() ||
+                !(constant->isZero() || constant->isMinusOne())) {
+                continue;
+            }
+
+            llvm::IRBuilder<> compare_builder(compare);
+
+            bool all_of = constant->isMinusOne();
+            llvm::Value *result = lanes[0];
+            for (unsigned i = 1; i < count; ++i) {
+                result = all_of ? compare_builder.CreateAnd(result, lanes[i]) : compare_builder.CreateOr(result, lanes[i]);
+            }
+
+            // eq -1 is all-of and ne 0 any-of; eq 0 and ne -1 negate them.
+            if ((compare->getPredicate() == llvm::ICmpInst::ICMP_EQ) != all_of) {
+                result = compare_builder.CreateNot(result);
+            }
+
+            compare->replaceAllUsesWith(result);
+            compare->eraseFromParent();
+        }
+
+        if (!bitcast->use_empty()) {
+            auto *integer_type = bitcast->getDestTy();
+
+            llvm::Value *result = llvm::ConstantInt::get(integer_type, 0);
+            for (unsigned i = 0; i < count; ++i) {
+                result = builder.CreateOr(result, builder.CreateShl(builder.CreateZExt(lanes[i], integer_type), i));
+            }
+
+            bitcast->replaceAllUsesWith(result);
+        }
+
+        bitcast->eraseFromParent();
+    }
+}
+
 }
 
 void
@@ -186,6 +281,8 @@ finalizeLibrary(llvm::Module& finalized_module, unsigned opt_level) {
     mpm.run(finalized_module);
 
     expandVectorReductions(finalized_module);
+    removeFreezes(finalized_module);
+    scalarizeBoolVectors(finalized_module);
 
 #if LLAIR_HAVE_SIGNPOST
     os_signpost_interval_end(signpost_log, signpost_id, "finalizeLibrary");
