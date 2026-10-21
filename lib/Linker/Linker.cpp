@@ -760,10 +760,28 @@ Linker::copyNamedMetadata() {
             }
 
             for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i) {
+                // A visible function reference names the stub its caller calls; it is only
+                // meaningful if that caller, and so the stub, was pulled.
+                if (NMD.getName() == "air.visible_function_references" &&
+                    !isPulledVisibleFunctionReference(*NMD.getOperand(i))) {
+                    continue;
+                }
+
                 NewNMD->addOperand(MapMetadata(NMD.getOperand(i), d_vmap, RF_None, TMap.get()));
             }
         }
     }
+}
+
+bool
+Linker::isPulledVisibleFunctionReference(const llvm::MDNode &reference) const {
+    if (reference.getNumOperands() != 3) {
+        return false;
+    }
+
+    auto stub = llvm::mdconst::dyn_extract_or_null<llvm::Function>(reference.getOperand(1));
+
+    return stub && d_vmap.count(stub) > 0;
 }
 
 void

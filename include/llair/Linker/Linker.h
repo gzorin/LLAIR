@@ -102,6 +102,7 @@ private:
     // First registered module that defines `name`, or null (stays a decl).
     const llvm::GlobalValue *findDefinition(llvm::StringRef) const;
     void                     copyNamedMetadata();
+    bool                     isPulledVisibleFunctionReference(const llvm::MDNode &) const;
 
     std::unique_ptr<TypeMapper> TMap;
 

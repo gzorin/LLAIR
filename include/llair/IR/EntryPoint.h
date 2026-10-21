@@ -28,7 +28,7 @@ template<typename T> struct module_ilist_traits;
 
 class EntryPoint : public llvm::ilist_node<EntryPoint> {
 public:
-    enum EntryPointKind { Vertex = 0, Fragment, Compute };
+    enum EntryPointKind { Vertex = 0, Fragment, Compute, Visible, Intersection };
 
 private:
     EntryPointKind d_kind;
@@ -417,6 +417,51 @@ private:
 
     ComputeEntryPoint(llvm::Function *, Module *);
     ComputeEntryPoint(llvm::MDNode *, Module *);
+};
+
+class VisibleEntryPoint : public EntryPoint {
+public:
+    static VisibleEntryPoint *Create(llvm::Function *, Module *);
+
+    void print(llvm::raw_ostream&) const override;
+
+private:
+    friend class Module;
+
+    VisibleEntryPoint(llvm::Function *, Module *);
+    VisibleEntryPoint(llvm::MDNode *, Module *);
+};
+
+class IntersectionEntryPoint : public EntryPoint {
+public:
+    enum PrimitiveKind { kTriangle, kBoundingBox };
+
+    // The intersection tags, which must match those of the intersector that calls the function.
+    enum Tag : unsigned {
+        kInstancing      = 1u << 0,
+        kTriangleData    = 1u << 1,
+        kWorldSpaceData  = 1u << 2,
+        kPrimitiveMotion = 1u << 3,
+        kInstanceMotion  = 1u << 4,
+        kExtendedLimits  = 1u << 5
+    };
+
+    static IntersectionEntryPoint *Create(llvm::Function *, PrimitiveKind, unsigned, Module *);
+
+    PrimitiveKind getPrimitiveKind() const { return d_primitive_kind; }
+    unsigned      getTags() const { return d_tags; }
+    bool          hasTag(Tag tag) const { return (d_tags & tag) != 0; }
+
+    void print(llvm::raw_ostream&) const override;
+
+private:
+    friend class Module;
+
+    IntersectionEntryPoint(llvm::Function *, PrimitiveKind, unsigned, Module *);
+    IntersectionEntryPoint(llvm::MDNode *, Module *);
+
+    PrimitiveKind d_primitive_kind = kTriangle;
+    unsigned      d_tags           = 0;
 };
 
 } // namespace llair

@@ -217,6 +217,12 @@ EntryPoint::setModule(Module *module) {
             } break;
             case Compute:
                 break;
+            case Visible: {
+                entry_points_md = d_module->getLLModule()->getNamedMetadata("air.visible");
+            } break;
+            case Intersection: {
+                entry_points_md = d_module->getLLModule()->getNamedMetadata("air.intersection");
+            } break;
             }
 
             if (entry_points_md) {
@@ -251,6 +257,12 @@ EntryPoint::setModule(Module *module) {
             } break;
             case Compute:
                 break;
+            case Visible: {
+                entry_points_md = d_module->getLLModule()->getNamedMetadata("air.visible");
+            } break;
+            case Intersection: {
+                entry_points_md = d_module->getLLModule()->getNamedMetadata("air.intersection");
+            } break;
             }
 
             if (entry_points_md) {
@@ -1547,6 +1559,101 @@ ComputeEntryPoint::ComputeEntryPoint(llvm::MDNode *md, Module *module)
 void
 ComputeEntryPoint::print(llvm::raw_ostream& os) const {
     os << "compute program ";
+    os << getName() << "\n";
+}
+
+// VisibleEntryPoint
+VisibleEntryPoint *
+VisibleEntryPoint::Create(llvm::Function *function, Module *module) {
+    return new VisibleEntryPoint(function, module);
+}
+
+VisibleEntryPoint::VisibleEntryPoint(llvm::Function *function, Module *module)
+    : EntryPoint(EntryPoint::Visible, function, module) {
+    auto &ll_context = function->getContext();
+
+    d_md.reset(llvm::MDTuple::get(ll_context,
+                                  {d_function_md.get(), llvm::MDTuple::get(ll_context, {}), d_arguments_md.get()}));
+}
+
+VisibleEntryPoint::VisibleEntryPoint(llvm::MDNode *md, Module *module)
+    : EntryPoint(EntryPoint::Visible, md, module) {
+}
+
+void
+VisibleEntryPoint::print(llvm::raw_ostream& os) const {
+    os << "visible function ";
+    os << getName() << "\n";
+}
+
+// IntersectionEntryPoint
+namespace {
+
+// In the order the metal compiler emits them.
+const std::pair<IntersectionEntryPoint::Tag, const char *> s_intersection_tags[] = {
+    { IntersectionEntryPoint::kInstancing, "air.instancing" },
+    { IntersectionEntryPoint::kTriangleData, "air.triangle_data" },
+    { IntersectionEntryPoint::kWorldSpaceData, "air.world_space_data" },
+    { IntersectionEntryPoint::kPrimitiveMotion, "air.primitive_motion" },
+    { IntersectionEntryPoint::kInstanceMotion, "air.instance_motion" },
+    { IntersectionEntryPoint::kExtendedLimits, "air.extended_limits" }
+};
+
+} // namespace
+
+IntersectionEntryPoint *
+IntersectionEntryPoint::Create(llvm::Function *function, PrimitiveKind primitive_kind, unsigned tags,
+                               Module *module) {
+    return new IntersectionEntryPoint(function, primitive_kind, tags, module);
+}
+
+IntersectionEntryPoint::IntersectionEntryPoint(llvm::Function *function, PrimitiveKind primitive_kind,
+                                               unsigned tags, Module *module)
+    : EntryPoint(EntryPoint::Intersection, function, module)
+    , d_primitive_kind(primitive_kind)
+    , d_tags(tags) {
+    auto &ll_context = function->getContext();
+
+    std::vector<llvm::Metadata *> mds = {
+        d_function_md.get(), llvm::MDTuple::get(ll_context, {}), d_arguments_md.get(),
+        llvm::MDString::get(ll_context, d_primitive_kind == kBoundingBox ? "air.bounding_box" : "air.triangle")
+    };
+
+    for (const auto &[tag, name] : s_intersection_tags) {
+        if (hasTag(tag)) {
+            mds.push_back(llvm::MDString::get(ll_context, name));
+        }
+    }
+
+    d_md.reset(llvm::MDTuple::get(ll_context, mds));
+}
+
+IntersectionEntryPoint::IntersectionEntryPoint(llvm::MDNode *md, Module *module)
+    : EntryPoint(EntryPoint::Intersection, md, module) {
+    for (auto it = d_md->op_begin() + 3, it_end = d_md->op_end(); it != it_end; ++it) {
+        auto string_md = llvm::dyn_cast<llvm::MDString>(it->get());
+        if (!string_md) {
+            continue;
+        }
+
+        auto keyword = string_md->getString();
+
+        if (keyword == "air.bounding_box") {
+            d_primitive_kind = kBoundingBox;
+            continue;
+        }
+
+        auto tag = std::find_if(std::begin(s_intersection_tags), std::end(s_intersection_tags),
+                                [keyword](const auto &entry) -> bool { return keyword == entry.second; });
+        if (tag != std::end(s_intersection_tags)) {
+            d_tags |= tag->first;
+        }
+    }
+}
+
+void
+IntersectionEntryPoint::print(llvm::raw_ostream& os) const {
+    os << "intersection function ";
     os << getName() << "\n";
 }
 

@@ -684,6 +684,76 @@ Module::syncMetadata() {
                                               [](EntryPoint *entry_point) -> void {}, Compare());
             }
         }
+
+        // Visible:
+        {
+            auto md = d_llmodule->getNamedMetadata("air.visible");
+
+            if (md) {
+                std::vector<llvm::MDNode *> mds;
+                std::copy(md->op_begin(), md->op_end(), std::back_inserter(mds));
+                std::sort(mds.begin(), mds.end());
+
+                std::vector<EntryPoint *> visible_entry_points;
+                std::copy_if(
+                    entry_points.begin(), entry_points.end(),
+                    std::back_inserter(visible_entry_points), [](auto entry_point) -> bool {
+                        return entry_point->getKind() == EntryPoint::EntryPointKind::Visible;
+                    });
+
+                struct Compare {
+                    bool operator()(llvm::MDNode *lhs, EntryPoint *rhs) const {
+                        return lhs < rhs->metadata();
+                    }
+                    bool operator()(EntryPoint *lhs, llvm::MDNode *rhs) const {
+                        return lhs->metadata() < rhs;
+                    }
+                };
+
+                for_each_symmetric_difference(mds.begin(), mds.end(), visible_entry_points.begin(),
+                                              visible_entry_points.end(),
+                                              [&](llvm::MDNode *md) -> void {
+                                                  auto entry_point =
+                                                      new VisibleEntryPoint(md, module);
+                                              },
+                                              [](EntryPoint *entry_point) -> void {}, Compare());
+            }
+        }
+
+        // Intersection:
+        {
+            auto md = d_llmodule->getNamedMetadata("air.intersection");
+
+            if (md) {
+                std::vector<llvm::MDNode *> mds;
+                std::copy(md->op_begin(), md->op_end(), std::back_inserter(mds));
+                std::sort(mds.begin(), mds.end());
+
+                std::vector<EntryPoint *> intersection_entry_points;
+                std::copy_if(
+                    entry_points.begin(), entry_points.end(),
+                    std::back_inserter(intersection_entry_points), [](auto entry_point) -> bool {
+                        return entry_point->getKind() == EntryPoint::EntryPointKind::Intersection;
+                    });
+
+                struct Compare {
+                    bool operator()(llvm::MDNode *lhs, EntryPoint *rhs) const {
+                        return lhs < rhs->metadata();
+                    }
+                    bool operator()(EntryPoint *lhs, llvm::MDNode *rhs) const {
+                        return lhs->metadata() < rhs;
+                    }
+                };
+
+                for_each_symmetric_difference(mds.begin(), mds.end(), intersection_entry_points.begin(),
+                                              intersection_entry_points.end(),
+                                              [&](llvm::MDNode *md) -> void {
+                                                  auto entry_point =
+                                                      new IntersectionEntryPoint(md, module);
+                                              },
+                                              [](EntryPoint *entry_point) -> void {}, Compare());
+            }
+        }
     }
 
     // Classes:
