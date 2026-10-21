@@ -1,6 +1,6 @@
 install(
   DIRECTORY llvm/
-  DESTINATION include/llvm-demangle
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/llvm-demangle
   FILES_MATCHING
   PATTERN "*.h"
 )

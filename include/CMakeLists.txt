@@ -1,6 +1,6 @@
 install(
   DIRECTORY llair/
-  DESTINATION include/llair
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/llair
   FILES_MATCHING
   PATTERN "*.gen"
   PATTERN "*.h"
